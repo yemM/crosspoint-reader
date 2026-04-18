@@ -200,7 +200,24 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
 
   LOG_DBG("SCT", "Streamed temp HTML to %s (%d bytes)", tmpHtmlPath.c_str(), fileSize);
 
+  // Pre-process: self-close void elements so expat can parse HTML5 chapter files
+  const auto tmpHtmlSanitizedPath = tmpHtmlPath + ".xml";
+  bool sanitizationModified = false;
+  const bool sanitizationOk =
+      ChapterHtmlSlimParser::selfCloseVoidElements(tmpHtmlPath, tmpHtmlSanitizedPath, sanitizationModified);
+  const bool useSanitized = sanitizationOk && sanitizationModified;
+  if (useSanitized) {
+    Storage.remove(tmpHtmlPath.c_str());
+  } else {
+    Storage.remove(tmpHtmlSanitizedPath.c_str());
+    if (!sanitizationOk) {
+      LOG_DBG("SCT", "Void-element sanitization failed, using original HTML");
+    }
+  }
+  const std::string& parserHtmlPath = useSanitized ? tmpHtmlSanitizedPath : tmpHtmlPath;
+
   if (!Storage.openFileForWrite("SCT", filePath, file)) {
+    Storage.remove(parserHtmlPath.c_str());
     return false;
   }
   writeSectionFileHeader(fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
@@ -236,7 +253,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   }
 
   ChapterHtmlSlimParser visitor(
-      epub, tmpHtmlPath, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
+      epub, parserHtmlPath, renderer, fontId, lineCompression, extraParagraphSpacing, paragraphAlignment, viewportWidth,
       viewportHeight, hyphenationEnabled, focusReadingEnabled,
       [this, &lut](std::unique_ptr<Page> page, const uint16_t paragraphIndex, const uint16_t listItemIndex) {
         lut.push_back({this->onPageComplete(std::move(page)), paragraphIndex, listItemIndex});
@@ -245,7 +262,7 @@ bool Section::createSectionFile(const int fontId, const float lineCompression, c
   Hyphenator::setPreferredLanguage(epub->getLanguage());
   success = visitor.parseAndBuildPages();
 
-  Storage.remove(tmpHtmlPath.c_str());
+  Storage.remove(parserHtmlPath.c_str());
   if (!success) {
     LOG_ERR("SCT", "Failed to parse XML and build pages");
     // Explicitly close() file before calling Storage.remove()

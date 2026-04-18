@@ -145,4 +145,10 @@ class ChapterHtmlSlimParser {
   bool parseAndBuildPages();
   void addLineToPage(std::shared_ptr<TextBlock> line);
   const std::vector<std::pair<std::string, uint16_t>>& getAnchors() const { return anchorData; }
+  // Rewrites src into dst, self-closing HTML5 void elements (<br> -> <br/>) and dropping
+  // void-element end tags (<br></br> -> <br/>) so expat's strict XML parser accepts the
+  // result. Returns false on any I/O error (dst is not usable; caller should fall back to
+  // src). On success, `modified` reports whether dst differs from src, so the caller can
+  // skip swapping files when the source was already well-formed.
+  static bool selfCloseVoidElements(const std::string& src, const std::string& dst, bool& modified);
 };
