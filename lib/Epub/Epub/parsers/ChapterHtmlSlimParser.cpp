@@ -971,6 +971,130 @@ void XMLCALL ChapterHtmlSlimParser::endElement(void* userData, const XML_Char* n
   }
 }
 
+bool ChapterHtmlSlimParser::selfCloseVoidElements(const std::string& src, const std::string& dst) {
+  // HTML5 void elements that must be self-closed for expat XML compatibility
+  static constexpr const char* VOID_TAGS[] = {"br",  "hr",     "img",   "input", "link",  "meta",
+                                              "area", "base",   "col",   "embed", "param", "source",
+                                              "track", "wbr"};
+  static constexpr size_t CHUNK = 512;
+
+  // Heap-allocate I/O buffers to stay within 256-byte stack limit
+  auto* inBuf = static_cast<uint8_t*>(malloc(CHUNK));
+  auto* outBuf = static_cast<uint8_t*>(malloc(CHUNK));
+  if (!inBuf || !outBuf) {
+    free(inBuf);
+    free(outBuf);
+    LOG_ERR("EHP", "selfCloseVoidElements: malloc failed");
+    return false;
+  }
+
+  FsFile inFile, outFile;
+  if (!Storage.openFileForRead("EHP", src, inFile)) {
+    free(inBuf);
+    free(outBuf);
+    return false;
+  }
+  if (!Storage.openFileForWrite("EHP", dst, outFile)) {
+    inFile.close();
+    free(inBuf);
+    free(outBuf);
+    return false;
+  }
+
+  // State machine: NORMAL streams bytes verbatim; IN_TAG accumulates tag name
+  // and inserts '/' before '>' when the tag is a void element not yet self-closed.
+  enum class State : uint8_t { NORMAL, IN_TAG };
+  State state = State::NORMAL;
+  char tagName[16] = {};
+  uint8_t tagNameLen = 0;
+  bool inVoidTag = false;
+  bool pastTagName = false;  // true once the tag name has been fully read
+  char lastNonSpaceChar = 0;
+  size_t outLen = 0;
+
+  auto flushOut = [&]() {
+    if (outLen > 0) {
+      outFile.write(outBuf, outLen);
+      outLen = 0;
+    }
+  };
+
+  auto writeChar = [&](char c) {
+    outBuf[outLen++] = static_cast<uint8_t>(c);
+    if (outLen >= CHUNK) {
+      flushOut();
+    }
+  };
+
+  while (inFile.available()) {
+    const size_t read = inFile.read(inBuf, CHUNK);
+    for (size_t i = 0; i < read; i++) {
+      const char c = static_cast<char>(inBuf[i]);
+
+      if (state == State::NORMAL) {
+        if (c == '<') {
+          state = State::IN_TAG;
+          tagNameLen = 0;
+          tagName[0] = '\0';
+          inVoidTag = false;
+          pastTagName = false;
+          lastNonSpaceChar = 0;
+        }
+        writeChar(c);
+      } else {
+        // IN_TAG
+        if (c == '>') {
+          // Classify tag name now if not yet done (e.g. <br> with no attributes)
+          if (!pastTagName && tagNameLen > 0) {
+            tagName[tagNameLen] = '\0';
+            for (const char* vt : VOID_TAGS) {
+              if (strcasecmp(tagName, vt) == 0) {
+                inVoidTag = true;
+                break;
+              }
+            }
+          }
+          if (inVoidTag && lastNonSpaceChar != '/') {
+            writeChar('/');
+          }
+          writeChar(c);
+          state = State::NORMAL;
+        } else {
+          writeChar(c);
+          if (!pastTagName) {
+            if (tagNameLen == 0 && (c == '/' || c == '!')) {
+              // Closing tag or declaration — not a void element
+              pastTagName = true;
+            } else if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '/') {
+              // End of tag name — classify it
+              pastTagName = true;
+              tagName[tagNameLen] = '\0';
+              for (const char* vt : VOID_TAGS) {
+                if (strcasecmp(tagName, vt) == 0) {
+                  inVoidTag = true;
+                  break;
+                }
+              }
+            } else if (tagNameLen < 15) {
+              tagName[tagNameLen++] = c;
+            }
+          }
+          if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+            lastNonSpaceChar = c;
+          }
+        }
+      }
+    }
+  }
+
+  flushOut();
+  inFile.close();
+  outFile.close();
+  free(inBuf);
+  free(outBuf);
+  return true;
+}
+
 bool ChapterHtmlSlimParser::parseAndBuildPages() {
   auto paragraphAlignmentBlockStyle = BlockStyle();
   paragraphAlignmentBlockStyle.textAlignDefined = true;
