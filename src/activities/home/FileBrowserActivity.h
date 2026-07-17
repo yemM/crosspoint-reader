@@ -57,12 +57,9 @@ class FileBrowserActivity final : public Activity {
   bool hasTabBar() const { return mode == Mode::Books; }
   bool inAllBooksView() const;
   size_t itemCount() const;
-  // Listing area rect shared by getPageItems()/getGridCols() and render()'s draw calls.
+  // Listing area rect shared by getPageItems() and render()'s draw calls.
   Rect listContentRect() const;
   int getPageItems() const;
-  // Column count of the "All Books" Grid style's current layout, or 0 outside grid mode. Used by
-  // loop() to translate Left/Right/Up/Down into linear selectorIndex deltas.
-  int getGridCols() const;
   // Cached-thumbnail height (px) the active flat-view style needs, or 0 if it shows no thumbnails.
   int wantThumbHeight() const;
   void toggleViewMode();

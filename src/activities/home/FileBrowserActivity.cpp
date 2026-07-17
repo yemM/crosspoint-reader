@@ -129,8 +129,8 @@ bool FileBrowserActivity::inAllBooksView() const {
 size_t FileBrowserActivity::itemCount() const { return inAllBooksView() ? flatBooks->size() : files.size(); }
 
 // The listing area below the header/tab bar and above the path bar/button hints — same geometry
-// render() uses to lay out drawList/drawBookList/drawBookGrid. Shared here so getPageItems() and
-// getGridCols() can't drift from what actually gets drawn.
+// render() uses to lay out drawList/drawBookList/drawBookGrid. Shared here so getPageItems()
+// can't drift from what actually gets drawn.
 Rect FileBrowserActivity::listContentRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pathReserved = renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing;
@@ -155,13 +155,6 @@ int FileBrowserActivity::getPageItems() const {
   }
   const int rowHeight = inAllBooksView() ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
   return std::max(1, rect.height / rowHeight);
-}
-
-int FileBrowserActivity::getGridCols() const {
-  if (!inAllBooksView() || SETTINGS.allBooksViewStyle != CrossPointSettings::ALL_BOOKS_GRID) {
-    return 0;
-  }
-  return GUI.computeBookGridLayout(listContentRect()).cols;
 }
 
 // Height (px) of the cached cover thumbnail the active flat-view style needs, or 0 if the style
@@ -469,69 +462,21 @@ void FileBrowserActivity::loop() {
   }
 
   const int totalSlots = static_cast<int>(itemCount()) + (hasTabBar() ? 1 : 0);
-  const bool gridNav = inAllBooksView() && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_GRID;
 
-  if (gridNav) {
-    // Grid is genuinely 2D, so it gets its own mapping instead of the single-axis Next/Previous
-    // used by List/Covers/folder view: front Left/Right move ±1 through the flat (row-major) order,
-    // side Up/Down move ±cols. Both axes flip together with the rest of the UI when
-    // frontButtonFollowOrientation rotates the screen (see MappedInputManager::isNavDirectionSwapped)
-    // — without this, "physical right" would move the selection left once the screen is rotated.
-    const int cols = std::max(1, getGridCols());
-    const bool swapped = mappedInput.isNavDirectionSwapped();
-    const auto moveNextCol = swapped ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
-    const auto movePrevCol = swapped ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
-    const auto moveNextRow = swapped ? MappedInputManager::Button::Up : MappedInputManager::Button::Down;
-    const auto movePrevRow = swapped ? MappedInputManager::Button::Down : MappedInputManager::Button::Up;
+  // Grid shares the exact same linear, row-major navigation as List/Covers: drawBookGrid lays out
+  // slots row-major (col = slot % cols, row = slot / cols — see BaseTheme::drawBookGrid), so a plain
+  // ±1 walk already moves right across a row and wraps down to the next row, matching every other
+  // list in the app. NavNext/NavPrevious already compose both side buttons and front Left/Right,
+  // with the orientation-based axis flip handled in MappedInputManager::isNavDirectionSwapped.
+  buttonNavigator.onNextRelease([this, totalSlots] {
+    selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), totalSlots);
+    requestUpdate();
+  });
 
-    buttonNavigator.onRelease({moveNextCol}, [this, totalSlots] {
-      selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), totalSlots);
-      requestUpdate();
-    });
-
-    buttonNavigator.onRelease({movePrevCol}, [this, totalSlots] {
-      selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), totalSlots);
-      requestUpdate();
-    });
-
-    buttonNavigator.onRelease({moveNextRow}, [this, totalSlots, cols] {
-      const int current = static_cast<int>(selectorIndex);
-      if (current == 0) {
-        // From the tab bar, Down enters the grid at its first cell (row 0, col 0).
-        if (totalSlots > 1) {
-          selectorIndex = 1;
-          requestUpdate();
-        }
-        return;
-      }
-      const int rowCount = totalSlots - 1;
-      const int nextRowIndex = (current - 1) + cols;
-      if (nextRowIndex < rowCount) {
-        selectorIndex = static_cast<size_t>(nextRowIndex + 1);
-        requestUpdate();
-      }
-      // Past the last row: no wraparound, selection simply stays put (matches the partial-last-row
-      // "no cell below" case without guessing at a nonexistent target column).
-    });
-
-    buttonNavigator.onRelease({movePrevRow}, [this, cols] {
-      const int current = static_cast<int>(selectorIndex);
-      if (current == 0) return;  // already at the top (tab bar); nothing above it
-      const int prevRowIndex = (current - 1) - cols;
-      selectorIndex = prevRowIndex >= 0 ? static_cast<size_t>(prevRowIndex + 1) : 0;
-      requestUpdate();
-    });
-  } else {
-    buttonNavigator.onNextRelease([this, totalSlots] {
-      selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), totalSlots);
-      requestUpdate();
-    });
-
-    buttonNavigator.onPreviousRelease([this, totalSlots] {
-      selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), totalSlots);
-      requestUpdate();
-    });
-  }
+  buttonNavigator.onPreviousRelease([this, totalSlots] {
+    selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), totalSlots);
+    requestUpdate();
+  });
 
   // Hold-to-page-jump is shared by every style, grid included: NavNext/NavPrevious already compose
   // both side buttons and front Left/Right (see MappedInputManager::mapButton), so this fires
