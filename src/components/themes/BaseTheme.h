@@ -264,8 +264,12 @@ class BaseTheme {
                             const std::function<BookListRowData(int index)>& rowData) const;
   // Shared cover height (px) for the flat "All books" Grid style — larger than bookListThumbHeight
   // since a grid cell shows only the cover (no title/author row) and has room for more detail. One
-  // cached thumb_160.bmp per book, generated on demand the same way as thumb_80.bmp.
-  static constexpr int bookGridThumbHeight = 160;
+  // cached thumb_280.bmp per book, generated on demand the same way as thumb_80.bmp. 280 is sized to
+  // match the 2-column portrait cell computeBookGridLayout now targets, so the cover fills the cell
+  // height without upscaling (covers are ~0.6 aspect, narrower than the cell box, so a side gap
+  // remains); old thumb_160.bmp files from the previous cell size are simply orphaned on SD
+  // (lazily regenerated at the new height, never read again).
+  static constexpr int bookGridThumbHeight = 280;
   // Computes {cols, rows, cellWidth, cellHeight, thumbWidth, thumbHeight} for a given content rect.
   // Orientation-aware: column count is derived from rect.width (via a target cell width), never a
   // hardcoded screen size, so portrait and landscape naturally get different column counts.

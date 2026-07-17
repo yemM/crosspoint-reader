@@ -442,7 +442,11 @@ BookGridLayout BaseTheme::computeBookGridLayout(Rect rect) const {
   // Baseline cell width used only to *derive* the column count from the available width — the
   // actual cell width is then re-divided evenly across that many columns. Never a hardcoded
   // screen/column count: portrait (narrower) naturally lands on fewer columns than landscape.
-  constexpr int targetCellWidth = 135;
+  // 200 is chosen so a 480-wide portrait screen (440 available after side padding) lands on
+  // exactly 2 columns (440/200 = 2), while an 800-wide landscape screen (760 available) lands on
+  // 3 (760/200 = 3) rather than 4 — bigger covers in both orientations, not just portrait. A
+  // 528-wide portrait panel (X3 variant) still lands on 2 (488/200 = 2).
+  constexpr int targetCellWidth = 200;
 
   const int availWidth = std::max(1, rect.width - 2 * BaseMetrics::values.contentSidePadding);
   const int cols = std::max(2, availWidth / targetCellWidth);
@@ -527,14 +531,17 @@ void BaseTheme::drawBookGrid(const GfxRenderer& renderer, Rect rect, int itemCou
       // No cover available (txt/md, or a failed/pending thumb build): draw a placeholder frame with
       // the truncated title inside, otherwise the cell would be blank and unidentifiable.
       renderer.drawRect(thumbX, thumbY, layout.thumbWidth, layout.thumbHeight);
+      // Cells are now large enough (see targetCellWidth above) that the small list-row font would
+      // look lost in the middle of the placeholder frame — UI_10 reads better at this size while
+      // staying a single truncated line, matching the simple placeholder style used elsewhere.
       constexpr int textInset = 6;
       const int textMaxWidth = std::max(0, layout.thumbWidth - 2 * textInset);
-      const auto title = renderer.truncatedText(SMALL_FONT_ID, cell.title.c_str(), textMaxWidth);
-      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, title.c_str());
-      const int textHeight = renderer.getLineHeight(SMALL_FONT_ID);
+      const auto title = renderer.truncatedText(UI_10_FONT_ID, cell.title.c_str(), textMaxWidth);
+      const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, title.c_str());
+      const int textHeight = renderer.getLineHeight(UI_10_FONT_ID);
       const int textX = thumbX + (layout.thumbWidth - textWidth) / 2;
       const int textY = thumbY + (layout.thumbHeight - textHeight) / 2;
-      renderer.drawText(SMALL_FONT_ID, textX, textY, title.c_str(), true);
+      renderer.drawText(UI_10_FONT_ID, textX, textY, title.c_str(), true);
     }
   }
 }
