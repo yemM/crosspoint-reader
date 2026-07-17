@@ -131,8 +131,7 @@ size_t FileBrowserActivity::itemCount() const { return inAllBooksView() ? flatBo
 int FileBrowserActivity::getPageItems() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pathReserved = renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing;
-  const int contentTop =
-      metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing + (hasTabBar() ? metrics.tabBarHeight : 0);
+  const int contentTop = metrics.topPadding + metrics.headerHeight + (hasTabBar() ? metrics.tabBarHeight : 0);
   const int contentHeight =
       renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing - pathReserved;
 
@@ -494,7 +493,7 @@ void FileBrowserActivity::render(RenderLock&&) {
   }
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle.c_str());
 
-  int contentTop = metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
+  int contentTop = metrics.topPadding + metrics.headerHeight;
   if (hasTabBar()) {
     const std::vector<TabInfo> tabs = {
         {tr(STR_FOLDERS), !flatView},
