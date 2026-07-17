@@ -267,6 +267,13 @@ class CrossPointSettings {
   char sdFontFamilyName[32] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
+  // All Books flat view style in the file browser (List = compact rows, Covers = thumbnail rows)
+  enum ALL_BOOKS_VIEW_STYLE { ALL_BOOKS_LIST = 0, ALL_BOOKS_COVERS = 1, ALL_BOOKS_VIEW_STYLE_COUNT };
+  uint8_t allBooksViewStyle = ALL_BOOKS_LIST;
+  // Whether the file browser is currently showing the flat "All books" view (1) or folder view (0).
+  // Toggled in-browser via the tab bar; category-less (see SettingsList.h) so it stays out of the
+  // on-device Settings screen.
+  uint8_t browserFlatView = 0;
   // Remove a book from the Recent Books list when its End-of-Book screen is reached (0 = off, 1 = on)
   uint8_t removeReadBooksFromRecents = 0;
   // Move epub to /Read/ folder on SD card when finished (0 = disabled, 1 = enabled)

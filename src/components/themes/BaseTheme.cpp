@@ -1,5 +1,6 @@
 #include "BaseTheme.h"
 
+#include <Bitmap.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
@@ -347,6 +348,89 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       }
       renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - BaseMetrics::values.contentSidePadding - valueTextWidth,
                         valueY, valueText.c_str(), i != selectedIndex);
+    }
+  }
+}
+
+void BaseTheme::drawBookList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                             const std::function<BookListRowData(int index)>& rowData) const {
+  const int rowHeight = getBookListRowHeight();
+  const int pageItems = std::max(1, rect.height / rowHeight);
+
+  const int totalPages = (itemCount + pageItems - 1) / pageItems;
+  if (totalPages > 1) {
+    // Pagination arrows — identical layout to drawList (BaseTheme.cpp).
+    constexpr int indicatorWidth = 20;
+    constexpr int arrowSize = 6;
+    constexpr int margin = 15;
+
+    const int centerX = rect.x + rect.width - indicatorWidth / 2 - margin;
+    const int indicatorTop = rect.y;
+    const int indicatorBottom = rect.y + rect.height - arrowSize;
+
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + i * 2;
+      const int startX = centerX - i;
+      renderer.drawLine(startX, indicatorTop + i, startX + lineWidth - 1, indicatorTop + i);
+    }
+
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + (arrowSize - 1 - i) * 2;
+      const int startX = centerX - (arrowSize - 1 - i);
+      renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + i, startX + lineWidth - 1,
+                        indicatorBottom - arrowSize + 1 + i);
+    }
+  }
+
+  constexpr int thumbWidth = 48;
+  const int thumbHeight = std::min(bookListThumbHeight, rowHeight);
+  const int thumbX = rect.x + BaseMetrics::values.contentSidePadding;
+  constexpr int textGap = 10;
+  const int textX = thumbX + thumbWidth + textGap;
+  const int textWidth = std::max(0, rect.x + rect.width - textX - BaseMetrics::values.contentSidePadding);
+
+  const int titleLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int subtitleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  constexpr int titleSubtitleGap = 4;
+
+  const auto pageStartIndex = selectedIndex / pageItems * pageItems;
+  for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
+    const int itemY = rect.y + (i % pageItems) * rowHeight;
+    const int thumbY = itemY + (rowHeight - thumbHeight) / 2;
+
+    // Selection = nested border rects, not fillRect inversion: drawBitmap1Bit only paints black
+    // pixels, so an inverted (black) row background would swallow the cover art underneath it.
+    if (i == selectedIndex) {
+      renderer.drawRect(rect.x + 2, itemY + 1, rect.width - 4, rowHeight - 2, 2, true);
+      renderer.drawRect(rect.x + 6, itemY + 5, rect.width - 12, rowHeight - 10, 1, true);
+    }
+
+    const BookListRowData row = rowData(i);
+
+    bool thumbDrawn = false;
+    if (!row.thumbPath.empty()) {
+      HalFile file;
+      if (Storage.openFileForRead("BKL", row.thumbPath, file)) {
+        Bitmap bitmap(file);
+        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+          renderer.drawBitmap1Bit(bitmap, thumbX, thumbY, thumbWidth, thumbHeight);
+          thumbDrawn = true;
+        }
+      }
+    }
+    if (!thumbDrawn) {
+      renderer.drawRect(thumbX, thumbY, thumbWidth, thumbHeight);
+    }
+
+    const int textBlockHeight = titleLineHeight + titleSubtitleGap + subtitleLineHeight;
+    const int textY = itemY + (rowHeight - textBlockHeight) / 2;
+
+    const auto title = renderer.truncatedText(UI_10_FONT_ID, row.title.c_str(), textWidth, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, textX, textY, title.c_str(), true, EpdFontFamily::BOLD);
+
+    if (!row.subtitle.empty()) {
+      const auto subtitle = renderer.truncatedText(SMALL_FONT_ID, row.subtitle.c_str(), textWidth);
+      renderer.drawText(SMALL_FONT_ID, textX, textY + titleLineHeight + titleSubtitleGap, subtitle.c_str(), true);
     }
   }
 }

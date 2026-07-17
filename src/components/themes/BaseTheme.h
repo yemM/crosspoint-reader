@@ -115,6 +115,15 @@ struct ThemeMetrics {
 
 enum UIIcon { None = 0, Folder, Text, Image, Book, File, Recent, Settings, Transfer, Library, Wifi, Hotspot, Bookmark };
 
+// One row's worth of data for BaseTheme::drawBookList, resolved lazily by the caller
+// (FlatBookList) since fetching title/author/thumb requires SD I/O.
+struct BookListRowData {
+  std::string title;      // resolved title, or filename fallback if metadata is unavailable
+  std::string subtitle;   // author; may be empty
+  std::string thumbPath;  // concrete BMP path to draw; empty = draw placeholder frame
+  UIIcon icon;            // fallback icon for themes/entries without a thumbnail
+};
+
 enum class KeyboardKeyType { Normal, Shift, Mode, Space, Del, Ok, Disabled };
 
 // Default theme implementation (Classic Theme)
@@ -225,6 +234,15 @@ class BaseTheme {
                              const char* rightLabel = nullptr) const;
   virtual void drawTabBar(const GfxRenderer& renderer, Rect rect, const std::vector<TabInfo>& tabs,
                           bool selected) const;
+  // Shared thumbnail height (px) for flat "All books" cover rows — one cached thumb_80.bmp per book.
+  static constexpr int bookListThumbHeight = 80;
+  virtual int getBookListRowHeight() const { return 96; }
+  // Paginated list of books with a 48x80 cover thumbnail, title, and author per row. Selection is
+  // drawn as nested border rects (not fillRect inversion) because drawBitmap1Bit only paints black
+  // pixels — an inverted background would swallow the cover art. rowData is invoked per visible row
+  // only, since resolving it requires SD I/O.
+  virtual void drawBookList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                            const std::function<BookListRowData(int index)>& rowData) const;
   virtual void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                    const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                    bool& bufferRestored, std::function<bool()> storeCoverBuffer) const;
