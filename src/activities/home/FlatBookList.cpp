@@ -14,7 +14,6 @@
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
-#include "components/themes/BaseTheme.h"
 
 namespace {
 constexpr const char* kCacheDir = "/.crosspoint";
@@ -31,9 +30,10 @@ std::string titleFallback(const std::string& path) {
 }
 
 // Resolves an epub's metadata (cheap cache read first, full build behind showPopup() on a miss)
-// and, if requested, its cover thumbnail. A single Epub instance is used throughout because
-// Epub::generateThumbBmp requires the metadata cache to already be loaded on that same instance.
-void resolveEpub(FlatBookList::Entry& entry, bool wantThumbs, const std::function<void()>& showPopup) {
+// and, if requested, its cover thumbnail at wantThumbHeight. A single Epub instance is used
+// throughout because Epub::generateThumbBmp requires the metadata cache to already be loaded on
+// that same instance.
+void resolveEpub(FlatBookList::Entry& entry, int wantThumbHeight, const std::function<void()>& showPopup) {
   Epub epub(entry.path, kCacheDir);
   bool loaded = epub.load(/*buildIfMissing=*/false, /*skipLoadingCss=*/true);
   if (!loaded) {
@@ -49,29 +49,27 @@ void resolveEpub(FlatBookList::Entry& entry, bool wantThumbs, const std::functio
     entry.meta = FlatBookList::Meta::None;
   }
 
-  if (!wantThumbs) {
-    return;  // Thumb resolution deferred until Covers style actually needs it.
+  if (wantThumbHeight == 0) {
+    return;  // Thumb resolution deferred until a thumbnail style (Covers/Grid) actually needs it.
   }
   if (entry.meta != FlatBookList::Meta::Loaded) {
-    entry.thumbResolved = true;
-    return;
+    return;  // No metadata means no cover; nothing to resolve regardless of requested height.
   }
 
-  const std::string thumbPath = epub.getThumbBmpPath(BaseTheme::bookListThumbHeight);
+  const std::string thumbPath = epub.getThumbBmpPath(wantThumbHeight);
   if (!Storage.exists(thumbPath.c_str())) {
     showPopup();
   }
-  entry.thumbPath = epub.generateThumbBmp(BaseTheme::bookListThumbHeight) ? thumbPath : "";
-  entry.thumbResolved = true;
+  entry.thumbPath = epub.generateThumbBmp(wantThumbHeight) ? thumbPath : "";
+  entry.thumbHeightResolved = wantThumbHeight;
 }
 
 // Xtc has no cheap/full split (XtcParser::open is a lightweight container open, not a multi-pass
 // index build), so metadata never needs the popup — only thumbnail generation (image decode) does.
-void resolveXtc(FlatBookList::Entry& entry, bool wantThumbs, const std::function<void()>& showPopup) {
+void resolveXtc(FlatBookList::Entry& entry, int wantThumbHeight, const std::function<void()>& showPopup) {
   Xtc xtc(entry.path, kCacheDir);
   if (!xtc.load()) {
     entry.meta = FlatBookList::Meta::None;
-    entry.thumbResolved = true;
     return;
   }
 
@@ -79,23 +77,20 @@ void resolveXtc(FlatBookList::Entry& entry, bool wantThumbs, const std::function
   entry.author = xtc.getAuthor();
   entry.meta = FlatBookList::Meta::Loaded;
 
-  if (!wantThumbs) {
+  if (wantThumbHeight == 0) {
     return;
   }
 
-  const std::string thumbPath = xtc.getThumbBmpPath(BaseTheme::bookListThumbHeight);
+  const std::string thumbPath = xtc.getThumbBmpPath(wantThumbHeight);
   if (!Storage.exists(thumbPath.c_str())) {
     showPopup();
   }
-  entry.thumbPath = xtc.generateThumbBmp(BaseTheme::bookListThumbHeight) ? thumbPath : "";
-  entry.thumbResolved = true;
+  entry.thumbPath = xtc.generateThumbBmp(wantThumbHeight) ? thumbPath : "";
+  entry.thumbHeightResolved = wantThumbHeight;
 }
 
 // txt/md have no embedded metadata or cover; displayTitle() falls back to the filename.
-void resolveTextLike(FlatBookList::Entry& entry) {
-  entry.meta = FlatBookList::Meta::None;
-  entry.thumbResolved = true;
-}
+void resolveTextLike(FlatBookList::Entry& entry) { entry.meta = FlatBookList::Meta::None; }
 }  // namespace
 
 bool FlatBookList::scan(char* nameBuffer, size_t bufferSize) {
@@ -173,18 +168,20 @@ bool FlatBookList::scan(char* nameBuffer, size_t bufferSize) {
   return true;
 }
 
-bool FlatBookList::pageNeedsWork(size_t start, size_t count, bool wantThumbs) const {
+bool FlatBookList::pageNeedsWork(size_t start, size_t count, int wantThumbHeight) const {
   const size_t end = std::min(start + count, entries.size());
   for (size_t i = start; i < end; i++) {
     const Entry& entry = entries[i];
     if (entry.meta == Meta::Unknown) return true;
-    if (wantThumbs && entry.meta == Meta::Loaded && !entry.thumbResolved) return true;
+    if (wantThumbHeight != 0 && entry.meta == Meta::Loaded && entry.thumbHeightResolved != wantThumbHeight) {
+      return true;
+    }
   }
   return false;
 }
 
 bool FlatBookList::ensureVisibleMetadata(GfxRenderer& renderer, MappedInputManager& mappedInput, size_t start,
-                                         size_t count, bool wantThumbs, bool& aborted) {
+                                         size_t count, int wantThumbHeight, bool& aborted) {
   aborted = false;
   bool changed = false;
   bool showingPopup = false;
@@ -205,7 +202,8 @@ bool FlatBookList::ensureVisibleMetadata(GfxRenderer& renderer, MappedInputManag
   for (size_t i = start; i < end; i++) {
     Entry& entry = entries[i];
     const bool needsMeta = entry.meta == Meta::Unknown;
-    const bool needsThumb = wantThumbs && entry.meta == Meta::Loaded && !entry.thumbResolved;
+    const bool needsThumb =
+        wantThumbHeight != 0 && entry.meta == Meta::Loaded && entry.thumbHeightResolved != wantThumbHeight;
     if (!needsMeta && !needsThumb) {
       continue;
     }
@@ -219,9 +217,9 @@ bool FlatBookList::ensureVisibleMetadata(GfxRenderer& renderer, MappedInputManag
     }
 
     if (FsHelpers::hasEpubExtension(entry.path)) {
-      resolveEpub(entry, wantThumbs, showPopup);
+      resolveEpub(entry, wantThumbHeight, showPopup);
     } else if (FsHelpers::hasXtcExtension(entry.path)) {
-      resolveXtc(entry, wantThumbs, showPopup);
+      resolveXtc(entry, wantThumbHeight, showPopup);
     } else {
       resolveTextLike(entry);
     }

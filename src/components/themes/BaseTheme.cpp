@@ -435,6 +435,110 @@ void BaseTheme::drawBookList(const GfxRenderer& renderer, Rect rect, int itemCou
   }
 }
 
+BookGridLayout BaseTheme::computeBookGridLayout(Rect rect) const {
+  // Cell inner padding around the thumbnail (also the margin used to fit the placeholder-frame
+  // label and the nested selection border rects without touching the neighboring cell).
+  constexpr int innerPad = 8;
+  // Baseline cell width used only to *derive* the column count from the available width — the
+  // actual cell width is then re-divided evenly across that many columns. Never a hardcoded
+  // screen/column count: portrait (narrower) naturally lands on fewer columns than landscape.
+  constexpr int targetCellWidth = 135;
+
+  const int availWidth = std::max(1, rect.width - 2 * BaseMetrics::values.contentSidePadding);
+  const int cols = std::max(2, availWidth / targetCellWidth);
+  const int cellWidth = availWidth / cols;
+
+  const int thumbWidth = std::max(20, cellWidth - 2 * innerPad);
+  // 2:3 book-cover aspect, capped at bookGridThumbHeight since that's the resolution the cached
+  // thumbnail was generated at — requesting a taller box just wastes layout space (drawBitmap1Bit
+  // never upscales).
+  const int thumbHeight = std::min(bookGridThumbHeight, thumbWidth * 3 / 2);
+  const int cellHeight = thumbHeight + 2 * innerPad;
+  const int rows = std::max(1, rect.height / cellHeight);
+
+  return BookGridLayout{cols, rows, cellWidth, cellHeight, thumbWidth, thumbHeight};
+}
+
+void BaseTheme::drawBookGrid(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                             const std::function<BookGridCellData(int index)>& cellData) const {
+  const BookGridLayout layout = computeBookGridLayout(rect);
+  const int pageItems = std::max(1, layout.cols * layout.rows);
+
+  const int totalPages = (itemCount + pageItems - 1) / pageItems;
+  if (totalPages > 1) {
+    // Pagination arrows — identical layout to drawList/drawBookList (BaseTheme.cpp).
+    constexpr int indicatorWidth = 20;
+    constexpr int arrowSize = 6;
+    constexpr int margin = 15;
+
+    const int centerX = rect.x + rect.width - indicatorWidth / 2 - margin;
+    const int indicatorTop = rect.y;
+    const int indicatorBottom = rect.y + rect.height - arrowSize;
+
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + i * 2;
+      const int startX = centerX - i;
+      renderer.drawLine(startX, indicatorTop + i, startX + lineWidth - 1, indicatorTop + i);
+    }
+
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + (arrowSize - 1 - i) * 2;
+      const int startX = centerX - (arrowSize - 1 - i);
+      renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + i, startX + lineWidth - 1,
+                        indicatorBottom - arrowSize + 1 + i);
+    }
+  }
+
+  const int gridX = rect.x + BaseMetrics::values.contentSidePadding;
+  const int innerPad = (layout.cellWidth - layout.thumbWidth) / 2;
+
+  const auto pageStartIndex = selectedIndex >= 0 ? selectedIndex / pageItems * pageItems : 0;
+  for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
+    const int slot = i - pageStartIndex;
+    const int col = slot % layout.cols;
+    const int row = slot / layout.cols;
+
+    const int cellX = gridX + col * layout.cellWidth;
+    const int cellY = rect.y + row * layout.cellHeight;
+    const int thumbX = cellX + innerPad;
+    const int thumbY = cellY + innerPad;
+
+    // Selection = nested border rects, not fillRect inversion: drawBitmap1Bit only paints black
+    // pixels, so an inverted (black) cell background would swallow the cover art underneath it.
+    if (i == selectedIndex) {
+      renderer.drawRect(cellX + 1, cellY + 1, layout.cellWidth - 2, layout.cellHeight - 2, 2, true);
+      renderer.drawRect(cellX + 5, cellY + 5, layout.cellWidth - 10, layout.cellHeight - 10, 1, true);
+    }
+
+    const BookGridCellData cell = cellData(i);
+
+    bool thumbDrawn = false;
+    if (!cell.thumbPath.empty()) {
+      HalFile file;
+      if (Storage.openFileForRead("BKG", cell.thumbPath, file)) {
+        Bitmap bitmap(file);
+        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+          renderer.drawBitmap1Bit(bitmap, thumbX, thumbY, layout.thumbWidth, layout.thumbHeight);
+          thumbDrawn = true;
+        }
+      }
+    }
+    if (!thumbDrawn) {
+      // No cover available (txt/md, or a failed/pending thumb build): draw a placeholder frame with
+      // the truncated title inside, otherwise the cell would be blank and unidentifiable.
+      renderer.drawRect(thumbX, thumbY, layout.thumbWidth, layout.thumbHeight);
+      constexpr int textInset = 6;
+      const int textMaxWidth = std::max(0, layout.thumbWidth - 2 * textInset);
+      const auto title = renderer.truncatedText(SMALL_FONT_ID, cell.title.c_str(), textMaxWidth);
+      const int textWidth = renderer.getTextWidth(SMALL_FONT_ID, title.c_str());
+      const int textHeight = renderer.getLineHeight(SMALL_FONT_ID);
+      const int textX = thumbX + (layout.thumbWidth - textWidth) / 2;
+      const int textY = thumbY + (layout.thumbHeight - textHeight) / 2;
+      renderer.drawText(SMALL_FONT_ID, textX, textY, title.c_str(), true);
+    }
+  }
+}
+
 void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* title, const char* subtitle) const {
   // Hide last battery draw
   constexpr int maxBatteryWidth = 80;

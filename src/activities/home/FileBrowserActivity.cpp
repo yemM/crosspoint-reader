@@ -128,18 +128,55 @@ bool FileBrowserActivity::inAllBooksView() const {
 
 size_t FileBrowserActivity::itemCount() const { return inAllBooksView() ? flatBooks->size() : files.size(); }
 
-int FileBrowserActivity::getPageItems() const {
+// The listing area below the header/tab bar and above the path bar/button hints — same geometry
+// render() uses to lay out drawList/drawBookList/drawBookGrid. Shared here so getPageItems() and
+// getGridCols() can't drift from what actually gets drawn.
+Rect FileBrowserActivity::listContentRect() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int pathReserved = renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing;
   const int contentTop = metrics.topPadding + metrics.headerHeight + (hasTabBar() ? metrics.tabBarHeight : 0);
   const int contentHeight =
       renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing - pathReserved;
+  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
+}
+
+int FileBrowserActivity::getPageItems() const {
+  const Rect rect = listContentRect();
+  const auto& metrics = UITheme::getInstance().getMetrics();
 
   if (inAllBooksView() && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_COVERS) {
-    return std::max(1, contentHeight / GUI.getBookListRowHeight());
+    return std::max(1, rect.height / GUI.getBookListRowHeight());
+  }
+  if (inAllBooksView() && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_GRID) {
+    // Shared with drawBookGrid via computeBookGridLayout so the activity's page size and the
+    // theme's rendered layout can never diverge.
+    const BookGridLayout layout = GUI.computeBookGridLayout(rect);
+    return std::max(1, layout.cols * layout.rows);
   }
   const int rowHeight = inAllBooksView() ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
-  return std::max(1, contentHeight / rowHeight);
+  return std::max(1, rect.height / rowHeight);
+}
+
+int FileBrowserActivity::getGridCols() const {
+  if (!inAllBooksView() || SETTINGS.allBooksViewStyle != CrossPointSettings::ALL_BOOKS_GRID) {
+    return 0;
+  }
+  return GUI.computeBookGridLayout(listContentRect()).cols;
+}
+
+// Height (px) of the cached cover thumbnail the active flat-view style needs, or 0 if the style
+// shows no thumbnails at all (List). Passed straight through to FlatBookList so it resolves (and,
+// if the style/height changed since the last resolve, re-resolves) each row at the right size.
+int FileBrowserActivity::wantThumbHeight() const {
+  switch (SETTINGS.allBooksViewStyle) {
+    case CrossPointSettings::ALL_BOOKS_COVERS:
+      return BaseTheme::bookListThumbHeight;
+    case CrossPointSettings::ALL_BOOKS_GRID:
+      return BaseTheme::bookGridThumbHeight;
+    case CrossPointSettings::ALL_BOOKS_LIST:
+    default:
+      return 0;
+  }
 }
 
 void FileBrowserActivity::toggleViewMode() {
@@ -432,16 +469,73 @@ void FileBrowserActivity::loop() {
   }
 
   const int totalSlots = static_cast<int>(itemCount()) + (hasTabBar() ? 1 : 0);
-  buttonNavigator.onNextRelease([this, totalSlots] {
-    selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), totalSlots);
-    requestUpdate();
-  });
+  const bool gridNav = inAllBooksView() && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_GRID;
 
-  buttonNavigator.onPreviousRelease([this, totalSlots] {
-    selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), totalSlots);
-    requestUpdate();
-  });
+  if (gridNav) {
+    // Grid is genuinely 2D, so it gets its own mapping instead of the single-axis Next/Previous
+    // used by List/Covers/folder view: front Left/Right move ±1 through the flat (row-major) order,
+    // side Up/Down move ±cols. Both axes flip together with the rest of the UI when
+    // frontButtonFollowOrientation rotates the screen (see MappedInputManager::isNavDirectionSwapped)
+    // — without this, "physical right" would move the selection left once the screen is rotated.
+    const int cols = std::max(1, getGridCols());
+    const bool swapped = mappedInput.isNavDirectionSwapped();
+    const auto moveNextCol = swapped ? MappedInputManager::Button::Left : MappedInputManager::Button::Right;
+    const auto movePrevCol = swapped ? MappedInputManager::Button::Right : MappedInputManager::Button::Left;
+    const auto moveNextRow = swapped ? MappedInputManager::Button::Up : MappedInputManager::Button::Down;
+    const auto movePrevRow = swapped ? MappedInputManager::Button::Down : MappedInputManager::Button::Up;
 
+    buttonNavigator.onRelease({moveNextCol}, [this, totalSlots] {
+      selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), totalSlots);
+      requestUpdate();
+    });
+
+    buttonNavigator.onRelease({movePrevCol}, [this, totalSlots] {
+      selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), totalSlots);
+      requestUpdate();
+    });
+
+    buttonNavigator.onRelease({moveNextRow}, [this, totalSlots, cols] {
+      const int current = static_cast<int>(selectorIndex);
+      if (current == 0) {
+        // From the tab bar, Down enters the grid at its first cell (row 0, col 0).
+        if (totalSlots > 1) {
+          selectorIndex = 1;
+          requestUpdate();
+        }
+        return;
+      }
+      const int rowCount = totalSlots - 1;
+      const int nextRowIndex = (current - 1) + cols;
+      if (nextRowIndex < rowCount) {
+        selectorIndex = static_cast<size_t>(nextRowIndex + 1);
+        requestUpdate();
+      }
+      // Past the last row: no wraparound, selection simply stays put (matches the partial-last-row
+      // "no cell below" case without guessing at a nonexistent target column).
+    });
+
+    buttonNavigator.onRelease({movePrevRow}, [this, cols] {
+      const int current = static_cast<int>(selectorIndex);
+      if (current == 0) return;  // already at the top (tab bar); nothing above it
+      const int prevRowIndex = (current - 1) - cols;
+      selectorIndex = prevRowIndex >= 0 ? static_cast<size_t>(prevRowIndex + 1) : 0;
+      requestUpdate();
+    });
+  } else {
+    buttonNavigator.onNextRelease([this, totalSlots] {
+      selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), totalSlots);
+      requestUpdate();
+    });
+
+    buttonNavigator.onPreviousRelease([this, totalSlots] {
+      selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), totalSlots);
+      requestUpdate();
+    });
+  }
+
+  // Hold-to-page-jump is shared by every style, grid included: NavNext/NavPrevious already compose
+  // both side buttons and front Left/Right (see MappedInputManager::mapButton), so this fires
+  // regardless of which physical button the user is holding.
   buttonNavigator.onNextContinuous([this, totalSlots, pageItems] {
     selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), totalSlots, pageItems);
     requestUpdate();
@@ -482,6 +576,7 @@ void FileBrowserActivity::render(RenderLock&&) {
 
   const bool flatView = inAllBooksView();
   const bool coversStyle = flatView && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_COVERS;
+  const bool gridStyle = flatView && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_GRID;
 
   std::string headerTitle;
   if (mode == Mode::PickFirmware) {
@@ -493,20 +588,19 @@ void FileBrowserActivity::render(RenderLock&&) {
   }
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle.c_str());
 
-  int contentTop = metrics.topPadding + metrics.headerHeight;
   if (hasTabBar()) {
     const std::vector<TabInfo> tabs = {
         {tr(STR_FOLDERS), !flatView},
         {tr(STR_ALL_BOOKS), flatView},
     };
-    GUI.drawTabBar(renderer, Rect{0, contentTop, pageWidth, metrics.tabBarHeight}, tabs, selectorIndex == 0);
-    contentTop += metrics.tabBarHeight;
+    GUI.drawTabBar(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight}, tabs,
+                   selectorIndex == 0);
   }
 
+  const Rect contentRect = listContentRect();
+  const int contentTop = contentRect.y;
+  const int contentHeight = contentRect.height;
   const int pathLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  const int pathReserved = pathLineHeight + metrics.verticalSpacing;
-  const int contentHeight =
-      pageHeight - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing - pathReserved;
 
   const size_t total = itemCount();
   const int rowSelIndex = hasTabBar() ? static_cast<int>(selectorIndex) - 1 : static_cast<int>(selectorIndex);
@@ -516,7 +610,13 @@ void FileBrowserActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, emptyMsg);
   } else if (flatView) {
     const auto& entries = flatBooks->getEntries();
-    if (coversStyle) {
+    if (gridStyle) {
+      GUI.drawBookGrid(renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(entries.size()),
+                       rowSelIndex, [&entries](int index) {
+                         const auto& e = entries[index];
+                         return BookGridCellData{FlatBookList::displayTitle(e), e.thumbPath};
+                       });
+    } else if (coversStyle) {
       GUI.drawBookList(renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(entries.size()),
                        rowSelIndex, [&entries](int index) {
                          const auto& e = entries[index];
@@ -600,13 +700,14 @@ void FileBrowserActivity::render(RenderLock&&) {
     const int pageItems = getPageItems();
     const size_t page = pageItems > 0 ? static_cast<size_t>(std::max(0, rowSelIndex)) / pageItems : 0;
     const size_t start = page * static_cast<size_t>(pageItems);
+    const int thumbHeight = wantThumbHeight();
 
     if (page != indexAbortedPage) {
       indexAbortedPage = SIZE_MAX;  // moving to a different page always clears the suppression
-      if (flatBooks->pageNeedsWork(start, static_cast<size_t>(pageItems), coversStyle)) {
+      if (flatBooks->pageNeedsWork(start, static_cast<size_t>(pageItems), thumbHeight)) {
         bool aborted = false;
         const bool changed = flatBooks->ensureVisibleMetadata(renderer, mappedInput, start,
-                                                              static_cast<size_t>(pageItems), coversStyle, aborted);
+                                                              static_cast<size_t>(pageItems), thumbHeight, aborted);
         if (aborted) {
           indexAbortedPage = page;
           lockNextBackRelease = true;

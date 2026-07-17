@@ -20,9 +20,15 @@ class FlatBookList {
     std::string path;
     std::string title;
     std::string author;
-    std::string thumbPath;      // resolved thumb_80.bmp path; empty until resolved or unavailable
+    // Resolved thumb_<thumbHeightResolved>.bmp path; empty until resolved or unavailable at that
+    // height. The List/Covers/Grid styles want different cached thumb heights (see
+    // BaseTheme::bookListThumbHeight / bookGridThumbHeight), so a height switch (toggling the "All
+    // Books Style" setting) must trigger re-resolution rather than reusing a mismatched thumb.
+    std::string thumbPath;
     Meta meta = Meta::Unknown;  // None is terminal: txt/md (no metadata) or a failed/corrupt build
-    bool thumbResolved = false;
+    // 0 = no thumbnail resolved yet for this entry; otherwise the height thumbPath was resolved at.
+    // Only meaningful when meta == Loaded — entries with no metadata never have a thumbnail.
+    int thumbHeightResolved = 0;
   };
 
   static constexpr size_t MAX_BOOKS = 300;
@@ -33,17 +39,19 @@ class FlatBookList {
   // (reuse the file browser's existing buffer rather than allocating a second one).
   bool scan(char* nameBuffer, size_t bufferSize);
 
-  // True if any row in [start, start + count) still needs metadata (or a thumbnail, if
-  // wantThumbs) resolved.
-  bool pageNeedsWork(size_t start, size_t count, bool wantThumbs) const;
+  // True if any row in [start, start + count) still needs metadata (or a thumbnail resolved at
+  // wantThumbHeight, if wantThumbHeight != 0) resolved.
+  bool pageNeedsWork(size_t start, size_t count, int wantThumbHeight) const;
 
   // Resolves metadata/thumbnails for the visible page only. Cheap (cache-hit) lookups happen
   // silently; the first row that needs a full uncached build triggers an "Indexing books" popup
   // with a progress bar for the rest of the page. Polls mappedInput between books and sets
   // aborted=true (stopping early) if Back is pressed. Returns true if anything changed and the
-  // caller should re-render.
+  // caller should re-render. wantThumbHeight of 0 skips thumbnail resolution entirely (List
+  // style); otherwise resolves (or re-resolves, if a different height was previously cached in
+  // this Entry) each row's thumbnail at that height.
   bool ensureVisibleMetadata(GfxRenderer& renderer, MappedInputManager& mappedInput, size_t start, size_t count,
-                             bool wantThumbs, bool& aborted);
+                             int wantThumbHeight, bool& aborted);
 
   const std::vector<Entry>& getEntries() const { return entries; }
   size_t size() const { return entries.size(); }

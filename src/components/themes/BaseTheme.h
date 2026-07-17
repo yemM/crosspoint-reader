@@ -124,6 +124,25 @@ struct BookListRowData {
   UIIcon icon;            // fallback icon for themes/entries without a thumbnail
 };
 
+// One cell's worth of data for BaseTheme::drawBookGrid, resolved lazily by the caller (FlatBookList)
+// since fetching the title/thumb requires SD I/O.
+struct BookGridCellData {
+  std::string title;      // used for the placeholder label when no cover thumbnail is available
+  std::string thumbPath;  // concrete BMP path to draw; empty = draw placeholder frame with title
+};
+
+// Cell geometry for BaseTheme::drawBookGrid, computed once from a content rect by
+// BaseTheme::computeBookGridLayout. Shared between FileBrowserActivity (page item count and
+// row/column navigation math) and drawBookGrid (rendering) so the two can never diverge.
+struct BookGridLayout {
+  int cols = 0;
+  int rows = 0;
+  int cellWidth = 0;
+  int cellHeight = 0;
+  int thumbWidth = 0;
+  int thumbHeight = 0;
+};
+
 enum class KeyboardKeyType { Normal, Shift, Mode, Space, Del, Ok, Disabled };
 
 // Default theme implementation (Classic Theme)
@@ -243,6 +262,21 @@ class BaseTheme {
   // only, since resolving it requires SD I/O.
   virtual void drawBookList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
                             const std::function<BookListRowData(int index)>& rowData) const;
+  // Shared cover height (px) for the flat "All books" Grid style — larger than bookListThumbHeight
+  // since a grid cell shows only the cover (no title/author row) and has room for more detail. One
+  // cached thumb_160.bmp per book, generated on demand the same way as thumb_80.bmp.
+  static constexpr int bookGridThumbHeight = 160;
+  // Computes {cols, rows, cellWidth, cellHeight, thumbWidth, thumbHeight} for a given content rect.
+  // Orientation-aware: column count is derived from rect.width (via a target cell width), never a
+  // hardcoded screen size, so portrait and landscape naturally get different column counts.
+  virtual BookGridLayout computeBookGridLayout(Rect rect) const;
+  // Cover-only grid for the "All books" Grid style: no title/author text, just thumbnails. Selection
+  // is nested border rects around the cell (same rationale as drawBookList — drawBitmap1Bit only
+  // paints black pixels, so an inverted background would swallow the cover art). Books with no
+  // resolvable cover draw a placeholder frame with truncated title text inside, so they stay
+  // identifiable. cellData is invoked per visible cell only, since resolving it requires SD I/O.
+  virtual void drawBookGrid(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                            const std::function<BookGridCellData(int index)>& cellData) const;
   virtual void drawRecentBookCover(GfxRenderer& renderer, Rect rect, const std::vector<RecentBook>& recentBooks,
                                    const int selectorIndex, bool& coverRendered, bool& coverBufferStored,
                                    bool& bufferRestored, std::function<bool()> storeCoverBuffer) const;

@@ -267,8 +267,14 @@ class CrossPointSettings {
   char sdFontFamilyName[32] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
   uint8_t showHiddenFiles = 0;
-  // All Books flat view style in the file browser (List = compact rows, Covers = thumbnail rows)
-  enum ALL_BOOKS_VIEW_STYLE { ALL_BOOKS_LIST = 0, ALL_BOOKS_COVERS = 1, ALL_BOOKS_VIEW_STYLE_COUNT };
+  // All Books flat view style in the file browser (List = compact rows, Covers = thumbnail rows,
+  // Grid = cover-only grid)
+  enum ALL_BOOKS_VIEW_STYLE {
+    ALL_BOOKS_LIST = 0,
+    ALL_BOOKS_COVERS = 1,
+    ALL_BOOKS_GRID = 2,
+    ALL_BOOKS_VIEW_STYLE_COUNT
+  };
   uint8_t allBooksViewStyle = ALL_BOOKS_LIST;
   // Whether the file browser is currently showing the flat "All books" view (1) or folder view (0).
   // Toggled in-browser via the tab bar; category-less (see SettingsList.h) so it stays out of the
