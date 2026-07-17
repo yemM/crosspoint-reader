@@ -453,12 +453,29 @@ BookGridLayout BaseTheme::computeBookGridLayout(Rect rect) const {
   const int cellWidth = availWidth / cols;
 
   const int thumbWidth = std::max(20, cellWidth - 2 * innerPad);
-  // 2:3 book-cover aspect, capped at bookGridThumbHeight since that's the resolution the cached
-  // thumbnail was generated at — requesting a taller box just wastes layout space (drawBitmap1Bit
-  // never upscales).
-  const int thumbHeight = std::min(bookGridThumbHeight, thumbWidth * 3 / 2);
-  const int cellHeight = thumbHeight + 2 * innerPad;
-  const int rows = std::max(1, rect.height / cellHeight);
+
+  // Row count is derived from the available height FIRST, then cellHeight/thumbHeight are fit to
+  // that row budget — not the other way around. A fixed target cell height (as before) is brittle:
+  // themes differ in chrome (header/tab bar/spacing) by 40-50px, and a fixed cellHeight means any
+  // theme whose content rect falls a few px short of an exact multiple silently loses an entire row
+  // (e.g. LyraTheme's taller header shrinks portrait content height to ~576px, just under the 592px
+  // two 296px-cell rows needed — collapsing 2x2 to 2x1). Deriving rows from height first means covers
+  // shrink slightly instead of a whole row vanishing.
+  //
+  // minRowHeight is chosen so a portrait content height in the ~550-650px range (what every current
+  // theme's chrome leaves, see BaseTheme/LyraTheme/RoundedRaffTheme ThemeMetrics) reliably yields 2
+  // rows, while a landscape content height in the ~250-300px range (half the portrait height, since
+  // landscape trades width for height) stays at 1 row — there simply isn't room for 2 full rows there.
+  constexpr int minRowHeight = 270;
+  const int rows = std::max(1, rect.height / minRowHeight);
+  const int cellHeight = rect.height / rows;
+
+  // 2:3 book-cover aspect cap intentionally removed here: thumbHeight now comes from the row budget,
+  // not a fixed aspect target. drawBitmap1Bit scales down uniformly to fit the box (see its
+  // implementation) and never upscales, so passing a shorter-than-cached box just downscales the
+  // cover — never stretches or distorts it. Still capped at bookGridThumbHeight (the cached
+  // thumb_280.bmp resolution): requesting a taller box than the cache just wastes layout space.
+  const int thumbHeight = std::max(20, std::min(bookGridThumbHeight, cellHeight - 2 * innerPad));
 
   return BookGridLayout{cols, rows, cellWidth, cellHeight, thumbWidth, thumbHeight};
 }
@@ -505,7 +522,10 @@ void BaseTheme::drawBookGrid(const GfxRenderer& renderer, Rect rect, int itemCou
     const int cellX = gridX + col * layout.cellWidth;
     const int cellY = rect.y + row * layout.cellHeight;
     const int thumbX = cellX + innerPad;
-    const int thumbY = cellY + innerPad;
+    // Vertical pad computed from the actual thumb height: when the thumb is capped at
+    // bookGridThumbHeight while the cell grew taller (rows divide the rect exactly), a fixed top
+    // pad would leave all the slack at the bottom.
+    const int thumbY = cellY + (layout.cellHeight - layout.thumbHeight) / 2;
 
     // Selection = nested border rects, not fillRect inversion: drawBitmap1Bit only paints black
     // pixels, so an inverted (black) cell background would swallow the cover art underneath it.
