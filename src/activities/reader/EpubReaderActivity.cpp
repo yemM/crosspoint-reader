@@ -983,7 +983,18 @@ void EpubReaderActivity::render(RenderLock&& lock) {
   if (!section) {
     const auto filepath = epub->getSpineItem(currentSpineIndex).href;
     LOG_DBG("ERS", "Loading file: %s, index: %d", filepath.c_str(), currentSpineIndex);
-    section = std::unique_ptr<Section>(new Section(epub, currentSpineIndex, renderer));
+    section = makeUniqueNoThrow<Section>(epub, currentSpineIndex, renderer);
+    if (!section) {
+      // OOM here means every use of `section` below this point -- through the rest of
+      // render() -- would dereference null. Bail out the same way an on-disk build
+      // failure does (see showBuildError() above): surface the existing index-failed
+      // popup and leave `section` null so the rest of the activity's null-guarded
+      // `section` checks (loop(), input handlers, status bar) treat this exactly like
+      // "no section loaded yet" instead of crashing.
+      LOG_ERR("ERS", "OOM allocating Section for spine index %d", currentSpineIndex);
+      showBuildError();
+      return;
+    }
     // Fresh section, fresh chance: a failed lazy extension start in a previous
     // section must not suppress watermark-triggered rebuilds for this one.
     partialRebuildStartFailed = false;
