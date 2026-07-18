@@ -481,13 +481,56 @@ void FileBrowserActivity::loop() {
   // Hold-to-page-jump is shared by every style, grid included: NavNext/NavPrevious already compose
   // both side buttons and front Left/Right (see MappedInputManager::mapButton), so this fires
   // regardless of which physical button the user is holding.
-  buttonNavigator.onNextContinuous([this, totalSlots, pageItems] {
-    selectorIndex = ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), totalSlots, pageItems);
+  //
+  // pageItems is a ROW count (see getPageItems()), but selectorIndex is a SLOT index: slot 0 is the
+  // tab bar and slots 1..itemCount() are rows (see rowSelIndex in render()). Doing the page-jump
+  // arithmetic directly on selectorIndex mixes the two spaces and misplaces or strands rows. So we
+  // convert slot -> row, run ButtonNavigator's page arithmetic in row space, then convert back,
+  // applying the tab-bar offset both ways. Mode::PickFirmware has no tab bar (hasTabBar() is false
+  // there), so slot space and row space already coincide and no conversion is needed — that path is
+  // left exactly as it was.
+  const bool tabBar = hasTabBar();
+  const int rowTotal = static_cast<int>(itemCount());
+
+  buttonNavigator.onNextContinuous([this, tabBar, rowTotal, pageItems] {
+    if (!tabBar) {
+      selectorIndex =
+          static_cast<size_t>(ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), rowTotal, pageItems));
+      requestUpdate();
+      return;
+    }
+    if (rowTotal > 0) {
+      if (selectorIndex == 0) {
+        // Slot 0 is the tab bar itself: a forward hold jumps straight into row 0 (top of page 1).
+        selectorIndex = 1;
+      } else {
+        const int currentRow = static_cast<int>(selectorIndex) - 1;
+        const int nextRow = ButtonNavigator::nextPageIndex(currentRow, rowTotal, pageItems);
+        selectorIndex = static_cast<size_t>(nextRow) + 1;
+      }
+    }
     requestUpdate();
   });
 
-  buttonNavigator.onPreviousContinuous([this, totalSlots, pageItems] {
-    selectorIndex = ButtonNavigator::previousPageIndex(static_cast<int>(selectorIndex), totalSlots, pageItems);
+  buttonNavigator.onPreviousContinuous([this, tabBar, rowTotal, pageItems] {
+    if (!tabBar) {
+      selectorIndex =
+          static_cast<size_t>(ButtonNavigator::previousPageIndex(static_cast<int>(selectorIndex), rowTotal, pageItems));
+      requestUpdate();
+      return;
+    }
+    if (rowTotal > 0) {
+      // Slot 0 is the tab bar itself: a backward hold jumps to the top row of the LAST page, so
+      // every row stays reachable without needing to first step onto row 0.
+      if (selectorIndex == 0) {
+        const int lastPageStart = ((rowTotal - 1) / pageItems) * pageItems;
+        selectorIndex = static_cast<size_t>(lastPageStart) + 1;
+      } else {
+        const int currentRow = static_cast<int>(selectorIndex) - 1;
+        const int prevRow = ButtonNavigator::previousPageIndex(currentRow, rowTotal, pageItems);
+        selectorIndex = static_cast<size_t>(prevRow) + 1;
+      }
+    }
     requestUpdate();
   });
 }
