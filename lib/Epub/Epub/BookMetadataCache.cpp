@@ -13,6 +13,10 @@
 namespace {
 constexpr uint8_t BOOK_CACHE_VERSION = 8;  // v8: TOC/book titles stored NFC-composed
 constexpr char bookBinFile[] = "/book.bin";
+// Build target for buildBookBin(): written in full, then swapped over book.bin with
+// Storage.rename() so a power-loss mid-build can never leave a partially-written
+// book.bin behind (see Section::binTmpPath() for the same pattern).
+constexpr char bookBinTmpFile[] = "/book.bin.part";
 constexpr char tmpSpineBinFile[] = "/spine.bin.tmp";
 constexpr char tmpTocBinFile[] = "/toc.bin.tmp";
 // Buffer size for the buildBookBin streams. 3 buffers x 4KB, transient (freed on
@@ -49,6 +53,22 @@ BookMetadataCache::SpineEntry readSpineEntryFrom(F& file) {
   serialization::readPod(file, entry.cumulativeSize);
   serialization::readPod(file, entry.tocIndex);
   return entry;
+}
+
+// serialization::readString() trusts the on-disk length prefix unconditionally: a torn
+// book.bin (version byte flushed, rest truncated/garbage by a power loss mid-write) can
+// carry an arbitrary length there, and std::string::resize() to that length aborts the
+// process on OOM (bare `new` under -fno-exceptions). Reject any length that would read
+// past the file's actual size instead of trusting it.
+bool readBoundedString(HalFile& file, std::string& out, const size_t fileSize) {
+  uint32_t len;
+  serialization::readPod(file, len);
+  if (static_cast<uint64_t>(file.position()) + len > static_cast<uint64_t>(fileSize)) {
+    return false;
+  }
+  out.resize(len);
+  file.read(&out[0], len);
+  return true;
 }
 
 template <typename F>
@@ -165,14 +185,25 @@ bool BookMetadataCache::endWrite() {
 }
 
 bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMetadata& metadata) {
-  // Open all three files, writing to meta, reading from spine and toc
-  if (!Storage.openFileForWrite("BMC", cachePath + bookBinFile, bookFile)) {
+  const std::string bookBinFinalPath = cachePath + bookBinFile;
+  const std::string bookBinTmpPath = cachePath + bookBinTmpFile;
+
+  // Remove a stale tmp left by a crash-interrupted build; this build recreates it.
+  if (Storage.exists(bookBinTmpPath.c_str())) {
+    Storage.remove(bookBinTmpPath.c_str());
+  }
+
+  // Open all three files, writing to the tmp meta file, reading from spine and toc.
+  // The tmp file is swapped over book.bin only after a full, successful write --
+  // see the rename at the bottom of this function.
+  if (!Storage.openFileForWrite("BMC", bookBinTmpPath, bookFile)) {
     return false;
   }
 
   if (!Storage.openFileForRead("BMC", cachePath + tmpSpineBinFile, spineFile)) {
     // Explicit close() required: member variable persists beyond function scope
     bookFile.close();
+    Storage.remove(bookBinTmpPath.c_str());
     return false;
   }
 
@@ -180,6 +211,7 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
     // Explicit close() required: member variables persist beyond function scope
     bookFile.close();
     spineFile.close();
+    Storage.remove(bookBinTmpPath.c_str());
     return false;
   }
 
@@ -199,8 +231,13 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
   const uint32_t lutSize = sizeof(uint32_t) * spineCount + sizeof(uint32_t) * tocCount;
   const uint32_t lutOffset = headerASize + metadataSize;
 
-  // Header A
-  serialization::writePod(bookOut, BOOK_CACHE_VERSION);
+  // Header A. The version byte is stamped as a sentinel (0) here and only patched to the
+  // real BOOK_CACHE_VERSION once the whole file is written and flushed successfully (see
+  // below) -- that makes the version byte the commit point, matching Section::commitBuildFile.
+  // A crash before that patch leaves a tmp file with version 0, which never gets renamed over
+  // book.bin, so load() can never observe it.
+  constexpr uint8_t SENTINEL_VERSION = 0;
+  serialization::writePod(bookOut, SENTINEL_VERSION);
   serialization::writePod(bookOut, lutOffset);
   serialization::writePod(bookOut, spineCount);
   serialization::writePod(bookOut, tocCount);
@@ -253,6 +290,7 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
     bookFile.close();
     spineFile.close();
     tocFile.close();
+    Storage.remove(bookBinTmpPath.c_str());
     return false;
   }
   // NOTE: We intentionally skip calling loadAllFileStatSlims() here.
@@ -349,16 +387,38 @@ bool BookMetadataCache::buildBookBin(const std::string& epubPath, const BookMeta
 
   const bool written = bookOut.flush();
 
+  if (written) {
+    // Commit point: patch the sentinel version to the real one now that every byte of the
+    // tmp file has been written and flushed. Only a fully-written file can ever carry a
+    // valid version byte. bookOut is done at this point (buffer drained, fill==0, so its
+    // destructor flush is a no-op) — do not write through bookOut after this direct seek.
+    bookFile.seek(0);
+    serialization::writePod(bookFile, BOOK_CACHE_VERSION);
+  }
+
   // Explicit close() required: member variables persist beyond function scope
   bookFile.close();
   spineFile.close();
   tocFile.close();
 
   if (!written) {
-    // A short write (card full/removed) would leave a truncated book.bin that
-    // still passes the version check on load; remove it so the next open rebuilds.
-    LOG_ERR("BMC", "Failed writing book.bin, removing truncated file");
-    Storage.remove((cachePath + bookBinFile).c_str());
+    // A short write (card full/removed) would leave a truncated tmp file; remove it so the
+    // next open rebuilds. book.bin itself is untouched since we never wrote to it directly.
+    LOG_ERR("BMC", "Failed writing book.bin, removing truncated tmp file");
+    Storage.remove(bookBinTmpPath.c_str());
+    return false;
+  }
+
+  // Swap the fully-committed tmp file over book.bin. A crash between the remove and the
+  // rename loses the old book.bin but leaves a fully-committed tmp behind; the next load()
+  // simply fails to find book.bin and rebuilds (see cleanupTmpFiles()/buildBookBin() stale-tmp
+  // removal above for the tmp side of that recovery).
+  if (Storage.exists(bookBinFinalPath.c_str())) {
+    Storage.remove(bookBinFinalPath.c_str());
+  }
+  if (!Storage.rename(bookBinTmpPath.c_str(), bookBinFinalPath.c_str())) {
+    LOG_ERR("BMC", "Failed to move built book.bin into place");
+    Storage.remove(bookBinTmpPath.c_str());
     return false;
   }
 
@@ -462,6 +522,8 @@ bool BookMetadataCache::load() {
     return false;
   }
 
+  const size_t fileSize = bookFile.fileSize();
+
   uint8_t version;
   serialization::readPod(bookFile, version);
   if (version != BOOK_CACHE_VERSION) {
@@ -475,11 +537,32 @@ bool BookMetadataCache::load() {
   serialization::readPod(bookFile, spineCount);
   serialization::readPod(bookFile, tocCount);
 
-  serialization::readString(bookFile, coreMetadata.title);
-  serialization::readString(bookFile, coreMetadata.author);
-  serialization::readString(bookFile, coreMetadata.language);
-  serialization::readString(bookFile, coreMetadata.coverItemHref);
-  serialization::readString(bookFile, coreMetadata.textReferenceHref);
+  // buildBookBin() only ever stamps a valid version byte after the whole file is written and
+  // renamed into place atomically (see buildBookBin()), so this should be unreachable in
+  // practice. It stays as a defense against caches built before that fix, or corrupted by
+  // other means (e.g. a bad SD sector): reject anything whose LUT wouldn't fit in the actual
+  // file rather than trusting it and reading garbage offsets/counts downstream.
+  constexpr uint32_t headerASize =
+      sizeof(BOOK_CACHE_VERSION) + sizeof(lutOffset) + sizeof(spineCount) + sizeof(tocCount);
+  const uint64_t lutSize = sizeof(uint32_t) * (static_cast<uint64_t>(spineCount) + tocCount);
+  if (lutOffset < headerASize || lutOffset > fileSize || static_cast<uint64_t>(lutOffset) + lutSize > fileSize) {
+    LOG_ERR("BMC", "Cache header inconsistent: lutOffset=%u spineCount=%u tocCount=%u fileSize=%u", lutOffset,
+            spineCount, tocCount, static_cast<unsigned>(fileSize));
+    // Explicit close() required: member variable persists beyond function scope
+    bookFile.close();
+    return false;
+  }
+
+  if (!readBoundedString(bookFile, coreMetadata.title, fileSize) ||
+      !readBoundedString(bookFile, coreMetadata.author, fileSize) ||
+      !readBoundedString(bookFile, coreMetadata.language, fileSize) ||
+      !readBoundedString(bookFile, coreMetadata.coverItemHref, fileSize) ||
+      !readBoundedString(bookFile, coreMetadata.textReferenceHref, fileSize)) {
+    LOG_ERR("BMC", "Cache metadata string truncated");
+    // Explicit close() required: member variable persists beyond function scope
+    bookFile.close();
+    return false;
+  }
 
   loaded = true;
   LOG_DBG("BMC", "Loaded cache data: %d spine, %d TOC entries", spineCount, tocCount);
