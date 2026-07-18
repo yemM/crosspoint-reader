@@ -189,6 +189,12 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
             "sleepTimeoutMinutes", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_SHOW_HIDDEN_FILES, &CrossPointSettings::showHiddenFiles, "showHiddenFiles",
                             StrId::STR_CAT_SYSTEM),
+        SettingInfo::Enum(StrId::STR_ALL_BOOKS_VIEW, &CrossPointSettings::allBooksViewStyle,
+                          {StrId::STR_VIEW_LIST, StrId::STR_VIEW_COVERS, StrId::STR_VIEW_GRID}, "allBooksViewStyle",
+                          StrId::STR_CAT_SYSTEM),
+        // Flat "All books" view toggle: persisted + web-exposed, but category-less so it is hidden
+        // from the on-device Settings screen (toggled from the file browser's tab bar).
+        SettingInfo::Toggle(StrId::STR_BROWSER_FLAT_VIEW, &CrossPointSettings::browserFlatView, "browserFlatView"),
         SettingInfo::Toggle(StrId::STR_REMOVE_READ_FROM_RECENTS, &CrossPointSettings::removeReadBooksFromRecents,
                             "removeReadBooksFromRecents", StrId::STR_CAT_SYSTEM),
         SettingInfo::Toggle(StrId::STR_MOVE_FINISHED_TO_READ, &CrossPointSettings::moveFinishedToReadFolder,

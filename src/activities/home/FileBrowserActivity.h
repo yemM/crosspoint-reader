@@ -5,9 +5,12 @@
 #include <string>
 #include <vector>
 
+#include "FlatBookList.h"
 #include "RecentBooksStore.h"
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
+
+struct Rect;
 
 class FileBrowserActivity final : public Activity {
  public:
@@ -34,9 +37,33 @@ class FileBrowserActivity final : public Activity {
   std::vector<std::string> files;
   std::unique_ptr<char[]> fileNameBuffer;
 
+  // "All books" flat view state (Mode::Books only). Populated lazily: the recursive scan runs
+  // once per activity lifetime (or on demand if the card wasn't scanned yet), metadata/thumbnails
+  // resolve one visible page at a time from render().
+  std::unique_ptr<FlatBookList> flatBooks;
+  bool flatScanned = false;
+  // Page index where lazy indexing was aborted (Back pressed mid-index); suppresses re-triggering
+  // indexing every render while the user sits on that page. Cleared as soon as the page changes.
+  size_t indexAbortedPage = SIZE_MAX;
+  // Swallows the Back release that follows an aborted indexing pass, so it doesn't also trigger
+  // "go up a directory" / "go home" on the same press.
+  bool lockNextBackRelease = false;
+
   // Data loading
   void loadFiles();
   size_t findEntry(const std::string& name) const;
+
+  // Tab bar + "All books" helpers
+  bool hasTabBar() const { return mode == Mode::Books; }
+  bool inAllBooksView() const;
+  size_t itemCount() const;
+  // Listing area rect shared by getPageItems() and render()'s draw calls.
+  Rect listContentRect() const;
+  int getPageItems() const;
+  // Cached-thumbnail height (px) the active flat-view style needs, or 0 if it shows no thumbnails.
+  int wantThumbHeight() const;
+  void toggleViewMode();
+  void enterAllBooksView(bool forceScan);
 
  public:
   explicit FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string initialPath = "/",

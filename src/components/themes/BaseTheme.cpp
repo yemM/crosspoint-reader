@@ -1,5 +1,6 @@
 #include "BaseTheme.h"
 
+#include <Bitmap.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalPowerManager.h>
@@ -347,6 +348,220 @@ void BaseTheme::drawList(const GfxRenderer& renderer, Rect rect, int itemCount, 
       }
       renderer.drawText(UI_10_FONT_ID, rect.x + contentWidth - BaseMetrics::values.contentSidePadding - valueTextWidth,
                         valueY, valueText.c_str(), i != selectedIndex);
+    }
+  }
+}
+
+void BaseTheme::drawBookList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                             const std::function<BookListRowData(int index)>& rowData) const {
+  const int rowHeight = getBookListRowHeight();
+  const int pageItems = std::max(1, rect.height / rowHeight);
+
+  const int totalPages = (itemCount + pageItems - 1) / pageItems;
+  if (totalPages > 1) {
+    // Pagination arrows — identical layout to drawList (BaseTheme.cpp).
+    constexpr int indicatorWidth = 20;
+    constexpr int arrowSize = 6;
+    constexpr int margin = 15;
+
+    const int centerX = rect.x + rect.width - indicatorWidth / 2 - margin;
+    const int indicatorTop = rect.y;
+    const int indicatorBottom = rect.y + rect.height - arrowSize;
+
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + i * 2;
+      const int startX = centerX - i;
+      renderer.drawLine(startX, indicatorTop + i, startX + lineWidth - 1, indicatorTop + i);
+    }
+
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + (arrowSize - 1 - i) * 2;
+      const int startX = centerX - (arrowSize - 1 - i);
+      renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + i, startX + lineWidth - 1,
+                        indicatorBottom - arrowSize + 1 + i);
+    }
+  }
+
+  constexpr int thumbWidth = 48;
+  const int thumbHeight = std::min(bookListThumbHeight, rowHeight);
+  const int thumbX = rect.x + BaseMetrics::values.contentSidePadding;
+  constexpr int textGap = 10;
+  const int textX = thumbX + thumbWidth + textGap;
+  const int textWidth = std::max(0, rect.x + rect.width - textX - BaseMetrics::values.contentSidePadding);
+
+  const int titleLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+  const int subtitleLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  constexpr int titleSubtitleGap = 4;
+
+  const auto pageStartIndex = selectedIndex / pageItems * pageItems;
+  for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
+    const int itemY = rect.y + (i % pageItems) * rowHeight;
+    const int thumbY = itemY + (rowHeight - thumbHeight) / 2;
+
+    // Selection = nested border rects, not fillRect inversion: drawBitmap1Bit only paints black
+    // pixels, so an inverted (black) row background would swallow the cover art underneath it.
+    if (i == selectedIndex) {
+      renderer.drawRect(rect.x + 2, itemY + 1, rect.width - 4, rowHeight - 2, 2, true);
+      renderer.drawRect(rect.x + 6, itemY + 5, rect.width - 12, rowHeight - 10, 1, true);
+    }
+
+    const BookListRowData row = rowData(i);
+
+    bool thumbDrawn = false;
+    if (!row.thumbPath.empty()) {
+      HalFile file;
+      if (Storage.openFileForRead("BKL", row.thumbPath, file)) {
+        Bitmap bitmap(file);
+        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+          renderer.drawBitmap1Bit(bitmap, thumbX, thumbY, thumbWidth, thumbHeight);
+          thumbDrawn = true;
+        }
+      }
+    }
+    if (!thumbDrawn) {
+      renderer.drawRect(thumbX, thumbY, thumbWidth, thumbHeight);
+    }
+
+    const int textBlockHeight = titleLineHeight + titleSubtitleGap + subtitleLineHeight;
+    const int textY = itemY + (rowHeight - textBlockHeight) / 2;
+
+    const auto title = renderer.truncatedText(UI_10_FONT_ID, row.title.c_str(), textWidth, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, textX, textY, title.c_str(), true, EpdFontFamily::BOLD);
+
+    if (!row.subtitle.empty()) {
+      const auto subtitle = renderer.truncatedText(SMALL_FONT_ID, row.subtitle.c_str(), textWidth);
+      renderer.drawText(SMALL_FONT_ID, textX, textY + titleLineHeight + titleSubtitleGap, subtitle.c_str(), true);
+    }
+  }
+}
+
+BookGridLayout BaseTheme::computeBookGridLayout(Rect rect) const {
+  // Cell inner padding around the thumbnail (also the margin used to fit the placeholder-frame
+  // label and the nested selection border rects without touching the neighboring cell).
+  constexpr int innerPad = 8;
+  // Baseline cell width used only to *derive* the column count from the available width — the
+  // actual cell width is then re-divided evenly across that many columns. Never a hardcoded
+  // screen/column count: portrait (narrower) naturally lands on fewer columns than landscape.
+  // 200 is chosen so a 480-wide portrait screen (440 available after side padding) lands on
+  // exactly 2 columns (440/200 = 2), while an 800-wide landscape screen (760 available) lands on
+  // 3 (760/200 = 3) rather than 4 — bigger covers in both orientations, not just portrait. A
+  // 528-wide portrait panel (X3 variant) still lands on 2 (488/200 = 2).
+  constexpr int targetCellWidth = 200;
+
+  const int availWidth = std::max(1, rect.width - 2 * BaseMetrics::values.contentSidePadding);
+  const int cols = std::max(2, availWidth / targetCellWidth);
+  const int cellWidth = availWidth / cols;
+
+  const int thumbWidth = std::max(20, cellWidth - 2 * innerPad);
+
+  // Row count is derived from the available height FIRST, then cellHeight/thumbHeight are fit to
+  // that row budget — not the other way around. A fixed target cell height (as before) is brittle:
+  // themes differ in chrome (header/tab bar/spacing) by 40-50px, and a fixed cellHeight means any
+  // theme whose content rect falls a few px short of an exact multiple silently loses an entire row
+  // (e.g. LyraTheme's taller header shrinks portrait content height to ~576px, just under the 592px
+  // two 296px-cell rows needed — collapsing 2x2 to 2x1). Deriving rows from height first means covers
+  // shrink slightly instead of a whole row vanishing.
+  //
+  // minRowHeight is chosen so a portrait content height in the ~550-650px range (what every current
+  // theme's chrome leaves, see BaseTheme/LyraTheme/RoundedRaffTheme ThemeMetrics) reliably yields 2
+  // rows, while a landscape content height in the ~250-300px range (half the portrait height, since
+  // landscape trades width for height) stays at 1 row — there simply isn't room for 2 full rows there.
+  constexpr int minRowHeight = 270;
+  const int rows = std::max(1, rect.height / minRowHeight);
+  const int cellHeight = rect.height / rows;
+
+  // 2:3 book-cover aspect cap intentionally removed here: thumbHeight now comes from the row budget,
+  // not a fixed aspect target. drawBitmap1Bit scales down uniformly to fit the box (see its
+  // implementation) and never upscales, so passing a shorter-than-cached box just downscales the
+  // cover — never stretches or distorts it. Still capped at bookGridThumbHeight (the cached
+  // thumb_280.bmp resolution): requesting a taller box than the cache just wastes layout space.
+  const int thumbHeight = std::max(20, std::min(bookGridThumbHeight, cellHeight - 2 * innerPad));
+
+  return BookGridLayout{cols, rows, cellWidth, cellHeight, thumbWidth, thumbHeight};
+}
+
+void BaseTheme::drawBookGrid(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,
+                             const std::function<BookGridCellData(int index)>& cellData) const {
+  const BookGridLayout layout = computeBookGridLayout(rect);
+  const int pageItems = std::max(1, layout.cols * layout.rows);
+
+  const int totalPages = (itemCount + pageItems - 1) / pageItems;
+  if (totalPages > 1) {
+    // Pagination arrows — identical layout to drawList/drawBookList (BaseTheme.cpp).
+    constexpr int indicatorWidth = 20;
+    constexpr int arrowSize = 6;
+    constexpr int margin = 15;
+
+    const int centerX = rect.x + rect.width - indicatorWidth / 2 - margin;
+    const int indicatorTop = rect.y;
+    const int indicatorBottom = rect.y + rect.height - arrowSize;
+
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + i * 2;
+      const int startX = centerX - i;
+      renderer.drawLine(startX, indicatorTop + i, startX + lineWidth - 1, indicatorTop + i);
+    }
+
+    for (int i = 0; i < arrowSize; ++i) {
+      const int lineWidth = 1 + (arrowSize - 1 - i) * 2;
+      const int startX = centerX - (arrowSize - 1 - i);
+      renderer.drawLine(startX, indicatorBottom - arrowSize + 1 + i, startX + lineWidth - 1,
+                        indicatorBottom - arrowSize + 1 + i);
+    }
+  }
+
+  const int gridX = rect.x + BaseMetrics::values.contentSidePadding;
+  const int innerPad = (layout.cellWidth - layout.thumbWidth) / 2;
+
+  const auto pageStartIndex = selectedIndex >= 0 ? selectedIndex / pageItems * pageItems : 0;
+  for (int i = pageStartIndex; i < itemCount && i < pageStartIndex + pageItems; i++) {
+    const int slot = i - pageStartIndex;
+    const int col = slot % layout.cols;
+    const int row = slot / layout.cols;
+
+    const int cellX = gridX + col * layout.cellWidth;
+    const int cellY = rect.y + row * layout.cellHeight;
+    const int thumbX = cellX + innerPad;
+    // Vertical pad computed from the actual thumb height: when the thumb is capped at
+    // bookGridThumbHeight while the cell grew taller (rows divide the rect exactly), a fixed top
+    // pad would leave all the slack at the bottom.
+    const int thumbY = cellY + (layout.cellHeight - layout.thumbHeight) / 2;
+
+    // Selection = nested border rects, not fillRect inversion: drawBitmap1Bit only paints black
+    // pixels, so an inverted (black) cell background would swallow the cover art underneath it.
+    if (i == selectedIndex) {
+      renderer.drawRect(cellX + 1, cellY + 1, layout.cellWidth - 2, layout.cellHeight - 2, 2, true);
+      renderer.drawRect(cellX + 5, cellY + 5, layout.cellWidth - 10, layout.cellHeight - 10, 1, true);
+    }
+
+    const BookGridCellData cell = cellData(i);
+
+    bool thumbDrawn = false;
+    if (!cell.thumbPath.empty()) {
+      HalFile file;
+      if (Storage.openFileForRead("BKG", cell.thumbPath, file)) {
+        Bitmap bitmap(file);
+        if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+          renderer.drawBitmap1Bit(bitmap, thumbX, thumbY, layout.thumbWidth, layout.thumbHeight);
+          thumbDrawn = true;
+        }
+      }
+    }
+    if (!thumbDrawn) {
+      // No cover available (txt/md, or a failed/pending thumb build): draw a placeholder frame with
+      // the truncated title inside, otherwise the cell would be blank and unidentifiable.
+      renderer.drawRect(thumbX, thumbY, layout.thumbWidth, layout.thumbHeight);
+      // Cells are now large enough (see targetCellWidth above) that the small list-row font would
+      // look lost in the middle of the placeholder frame — UI_10 reads better at this size while
+      // staying a single truncated line, matching the simple placeholder style used elsewhere.
+      constexpr int textInset = 6;
+      const int textMaxWidth = std::max(0, layout.thumbWidth - 2 * textInset);
+      const auto title = renderer.truncatedText(UI_10_FONT_ID, cell.title.c_str(), textMaxWidth);
+      const int textWidth = renderer.getTextWidth(UI_10_FONT_ID, title.c_str());
+      const int textHeight = renderer.getLineHeight(UI_10_FONT_ID);
+      const int textX = thumbX + (layout.thumbWidth - textWidth) / 2;
+      const int textY = thumbY + (layout.thumbHeight - textHeight) / 2;
+      renderer.drawText(UI_10_FONT_ID, textX, textY, title.c_str(), true);
     }
   }
 }
