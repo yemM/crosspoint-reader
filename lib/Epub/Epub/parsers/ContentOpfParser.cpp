@@ -2,10 +2,12 @@
 
 #include <FsHelpers.h>
 #include <Logging.h>
+#include <Memory.h>
 #include <Serialization.h>
 #include <XmlParserUtils.h>
 
 #include <cctype>
+#include <cstring>
 
 #include "Epub/BookMetadataCache.h"
 
@@ -13,6 +15,7 @@ namespace {
 constexpr char MEDIA_TYPE_NCX[] = "application/x-dtbncx+xml";
 constexpr char MEDIA_TYPE_CSS[] = "text/css";
 constexpr char MEDIA_TYPE_IMAGE_PREFIX[] = "image/";
+constexpr char MEDIA_TYPE_SVG[] = "image/svg+xml";
 constexpr char itemCacheFile[] = "/.items.bin";
 
 bool startsWithImageMediaType(const std::string& mediaType) {
@@ -54,6 +57,39 @@ ContentOpfParser::~ContentOpfParser() {
   if (Storage.exists(itemCachePath.c_str())) {
     Storage.remove(itemCachePath.c_str());
   }
+}
+
+bool ContentOpfParser::pushIndexEntry(const ItemIndexEntry& entry) {
+  if (itemIndexCount >= ITEM_INDEX_MAX_ENTRIES) {
+    if (!itemIndexOverflowed) {
+      itemIndexOverflowed = true;
+      LOG_DBG("COF", "Item index capacity (%zu) reached; remaining manifest items resolved via linear scan",
+              ITEM_INDEX_MAX_ENTRIES);
+    }
+    return false;
+  }
+
+  if (itemIndexCount == itemIndexCapacity) {
+    const size_t newCapacity =
+        itemIndexCapacity == 0 ? ITEM_INDEX_INITIAL_CAPACITY : std::min(itemIndexCapacity * 2, ITEM_INDEX_MAX_ENTRIES);
+    auto grown = makeUniqueNoThrow<ItemIndexEntry[]>(newCapacity);
+    if (!grown) {
+      // LOG_ERR: this is the OOM condition this index exists to survive; keep it
+      // visible in release builds for field diagnosis.
+      LOG_ERR("COF", "OOM growing item index at %zu entries; remaining manifest items resolved via linear scan",
+              itemIndexCount);
+      itemIndexOverflowed = true;
+      return false;
+    }
+    if (itemIndex) {
+      memcpy(grown.get(), itemIndex.get(), itemIndexCount * sizeof(ItemIndexEntry));
+    }
+    itemIndex = std::move(grown);
+    itemIndexCapacity = newCapacity;
+  }
+
+  itemIndex[itemIndexCount++] = entry;
+  return true;
 }
 
 size_t ContentOpfParser::write(const uint8_t data) { return write(&data, 1); }
@@ -137,15 +173,18 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
       LOG_ERR("COF", "Couldn't open temp items file for reading. This is probably going to be a fatal error.");
     }
 
-    // Sort the (unconditionally-built) item index so every idref lookup uses binary
+    // Sort the (bounded, filtered) item index so every idref lookup uses binary
     // search. Without this, small/medium manifests fell back to an O(spine × manifest)
     // linear rescan of .items.bin per itemref (up to ~200ms/item at large scale).
-    if (!self->itemIndex.empty()) {
-      std::sort(self->itemIndex.begin(), self->itemIndex.end(), [](const ItemIndexEntry& a, const ItemIndexEntry& b) {
-        return a.idHash < b.idHash || (a.idHash == b.idHash && a.idLen < b.idLen);
-      });
+    // Items excluded from the index (filtered media-type, or capacity overflow on huge
+    // manifests) are still resolved correctly via the linear-scan fallback below.
+    if (self->itemIndexCount > 0) {
+      std::sort(self->itemIndex.get(), self->itemIndex.get() + self->itemIndexCount,
+                [](const ItemIndexEntry& a, const ItemIndexEntry& b) {
+                  return a.idHash < b.idHash || (a.idHash == b.idHash && a.idLen < b.idLen);
+                });
       self->useItemIndex = true;
-      LOG_DBG("COF", "Using fast index for %zu manifest items", self->itemIndex.size());
+      LOG_DBG("COF", "Using fast index for %zu of manifest items", self->itemIndexCount);
     }
     return;
   }
@@ -196,13 +235,21 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
       }
     }
 
-    // Record index entry for fast lookup later
-    if (self->tempItemStore) {
+    // Record index entry for fast lookup later. Spine itemref never targets a CSS,
+    // NCX, or (in the overwhelming majority of real-world EPUBs) raster image item,
+    // so skipping those keeps the index small for image-heavy manifests (e.g. an
+    // image-per-article encyclopaedia EPUB) rather than growing it 1:1 with every
+    // manifest resource. SVG is exempt from the image filter: fixed-layout books can
+    // legitimately use image/svg+xml items as spine documents. This is a performance
+    // filter only: any item skipped here (or dropped due to index capacity) is still
+    // resolved correctly by the linear-scan fallback in the IN_SPINE branch below.
+    if (self->tempItemStore && (!startsWithImageMediaType(mediaType) || mediaType == MEDIA_TYPE_SVG) &&
+        mediaType != MEDIA_TYPE_CSS && mediaType != MEDIA_TYPE_NCX) {
       ItemIndexEntry entry;
       entry.idHash = fnvHash(itemId);
       entry.idLen = static_cast<uint16_t>(itemId.size());
       entry.fileOffset = static_cast<uint32_t>(self->tempItemStore.position());
-      self->itemIndex.push_back(entry);
+      self->pushIndexEntry(entry);  // best-effort; bounded + nothrow, misses fall back to linear scan
     }
 
     // Write items down to SD card
@@ -267,14 +314,15 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
             uint32_t targetHash = fnvHash(idref);
             uint16_t targetLen = static_cast<uint16_t>(idref.size());
 
-            auto it = std::lower_bound(self->itemIndex.begin(), self->itemIndex.end(),
-                                       ItemIndexEntry{targetHash, targetLen, 0},
+            auto* beginIt = self->itemIndex.get();
+            auto* endIt = self->itemIndex.get() + self->itemIndexCount;
+            auto it = std::lower_bound(beginIt, endIt, ItemIndexEntry{targetHash, targetLen, 0},
                                        [](const ItemIndexEntry& a, const ItemIndexEntry& b) {
                                          return a.idHash < b.idHash || (a.idHash == b.idHash && a.idLen < b.idLen);
                                        });
 
             // Check for match (may need to check a few due to hash collisions)
-            while (it != self->itemIndex.end() && it->idHash == targetHash) {
+            while (it != endIt && it->idHash == targetHash) {
               self->tempItemStore.seek(it->fileOffset);
               std::string itemId;
               serialization::readString(self->tempItemStore, itemId);
@@ -285,9 +333,14 @@ void XMLCALL ContentOpfParser::startElement(void* userData, const XML_Char* name
               }
               ++it;
             }
-          } else {
-            // Fallback linear scan, only reached when the index is empty (no manifest
-            // items). The fast binary-search path above is used for all real manifests.
+          }
+
+          if (!found) {
+            // Linear scan fallback: reached when no index was built at all, and also
+            // when an idref targets an item the (bounded, filtered) index doesn't
+            // cover -- e.g. an SVG spine item (media-type "image/svg+xml", excluded by
+            // the image/* filter above) or a manifest item past ITEM_INDEX_MAX_ENTRIES.
+            // Correctness never depends on the index being complete, only speed does.
             self->tempItemStore.seek(0);
             std::string itemId;
             while (self->tempItemStore.available()) {

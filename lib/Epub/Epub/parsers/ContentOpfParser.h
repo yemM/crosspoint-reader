@@ -2,7 +2,7 @@
 #include <Print.h>
 
 #include <algorithm>
-#include <deque>
+#include <memory>
 #include <vector>
 
 #include "Epub.h"
@@ -32,14 +32,41 @@ class ContentOpfParser final : public Print {
   HalFile tempItemStore;
   std::string coverItemId;
 
-  // Index for fast idref→href lookup (binary search over .items.bin)
+  // Index for fast idref→href lookup (binary search over .items.bin).
+  //
+  // Bounded, nothrow-growable storage: a manifest can contain thousands of
+  // items (e.g. an image-heavy encyclopaedia EPUB has one <item> per
+  // thumbnail), and only a subset of those are ever targets of a spine
+  // itemref. A throwing container (std::deque/std::vector push_back) sized
+  // 1:1 with manifest items was observed to exhaust heap and abort() via
+  // bad_alloc under -fno-exceptions on such books. This index is therefore:
+  //   1. Filtered at insertion (see startElement): items whose media-type
+  //      can never be a spine target (image/*, CSS, NCX) are not indexed.
+  //   2. Hard-capped at ITEM_INDEX_MAX_ENTRIES with nothrow doubling growth.
+  // Because the index is intentionally a *subset* of manifest items, every
+  // idref lookup that misses the index falls back to a linear scan of
+  // .items.bin (see startElement, IN_SPINE branch) — correctness never
+  // depends on every item being indexed, only performance does.
   struct ItemIndexEntry {
     uint32_t idHash;      // FNV-1a hash of itemId
     uint16_t idLen;       // length for collision reduction
     uint32_t fileOffset;  // offset in .items.bin
   };
-  std::deque<ItemIndexEntry> itemIndex;
+  static constexpr size_t ITEM_INDEX_INITIAL_CAPACITY = 64;
+  // ~36KB worst case (12 bytes/entry). Well above realistic "document" item
+  // counts (spine-referenceable items), since image/CSS/NCX items are
+  // filtered out before ever reaching the index.
+  static constexpr size_t ITEM_INDEX_MAX_ENTRIES = 3000;
+  std::unique_ptr<ItemIndexEntry[]> itemIndex;
+  size_t itemIndexCount = 0;
+  size_t itemIndexCapacity = 0;
+  bool itemIndexOverflowed = false;
   bool useItemIndex = false;
+
+  // Appends to the bounded index with nothrow doubling growth. Returns false
+  // (without indexing the entry) once ITEM_INDEX_MAX_ENTRIES is reached or on
+  // OOM; callers must tolerate misses via the linear-scan fallback.
+  bool pushIndexEntry(const ItemIndexEntry& entry);
 
   // FNV-1a hash function
   static uint32_t fnvHash(const std::string& s) {
