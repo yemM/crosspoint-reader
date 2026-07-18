@@ -203,6 +203,22 @@ void FileBrowserActivity::enterAllBooksView(bool forceScan) {
   if (forceScan || !flatScanned) {
     GUI.drawPopup(renderer, tr(STR_SCANNING_BOOKS));
     flatScanned = flatBooks->scan(fileNameBuffer.get(), NAME_BUFFER_SIZE);
+    if (!flatScanned) {
+      // inAllBooksView() never consults flatScanned, so without this the user would toggle to All
+      // Books and land on a silent, unexplained empty list. Fall back the same way the !flatBooks
+      // OOM branch above does: drop back to folder view instead of a dead end.
+      LOG_ERR("FileBrowser", "OOM scanning all books; falling back to folder view");
+      // Destroy the list rather than relying on each scan() failure path to release its own
+      // reservations: entries.reserve(MAX_BOOKS) is ~31KB, and stranding it is worst precisely
+      // here, on the OOM path. Safe because inAllBooksView() already tolerates a null flatBooks,
+      // and flatScanned stays false so re-entering the view rescans from scratch.
+      flatBooks.reset();
+      SETTINGS.browserFlatView = 0;
+      SETTINGS.saveToFile();
+      basepath = "/";
+      loadFiles();
+      return;
+    }
   }
   indexAbortedPage = SIZE_MAX;
 }

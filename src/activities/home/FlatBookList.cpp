@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <new>
 
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
@@ -91,12 +92,46 @@ void resolveXtc(FlatBookList::Entry& entry, int wantThumbHeight, const std::func
 
 // txt/md have no embedded metadata or cover; displayTitle() falls back to the filename.
 void resolveTextLike(FlatBookList::Entry& entry) { entry.meta = FlatBookList::Meta::None; }
+
+// A wide/deep folder tree is user-reachable (no malicious input needed) and would otherwise grow
+// dirStack without bound: every subdirectory found is pushed before any of its siblings are popped
+// (DFS via a LIFO stack), so a single directory with thousands of children pushes them all at once.
+// Bounding it lets us reserve its capacity exactly once, the same way MAX_BOOKS bounds entries.
+// Kept small (192, ~4.6KB) rather than matching MAX_BOOKS: this reserve is held concurrently with
+// entries.reserve(MAX_BOOKS) (~31KB for sizeof(Entry)==104), so an oversized cap here would spend
+// scarce heap guarding an allocation path instead of shrinking its OOM risk. 192 is sized off the
+// layout that actually reaches this cap: DFS pushes every child of a directory before descending
+// into any of them, so a Calibre-style /Books/<author>/ library with ~100 author folders holding
+// 2 books each stacks ~100 directories while staying well under MAX_BOOKS. A tighter cap would
+// silently skip those authors and present a partial list as complete.
+constexpr size_t MAX_DIR_STACK = 192;
+
+// Probes a same-sized allocation through the nothrow global operator new and immediately frees it.
+// vector::reserve() allocates through the THROWING global operator new; under -fno-exceptions
+// (CLAUDE.md rule 9) a failed throwing new calls abort(), not a recoverable failure. This probe
+// narrows the failure window to the handful of instructions between the ::operator delete below
+// and the caller's reserve() call — it is not a guarantee under preemption: this is a single-core
+// RTOS running a preemptive scheduler alongside WiFi/lwIP/WebServer/mDNS, and a tick interrupt
+// landing in that window could schedule another allocating context, which is exactly the scenario
+// most likely under the memory pressure this guard exists for. It is a documented mitigation that
+// makes the common case observable and recoverable, not an invariant that can never fail.
+bool canAllocate(size_t bytes) {
+  void* probe = ::operator new(bytes, std::nothrow);
+  if (!probe) return false;
+  ::operator delete(probe);
+  return true;
+}
 }  // namespace
 
 bool FlatBookList::scan(char* nameBuffer, size_t bufferSize) {
   entries.clear();
-  // Single ~30KB block; vector's throwing operator new aborts on OOM. Acceptable here:
-  // the browser context has no reader buffers live. MAX_BOOKS is the retune knob.
+  // MAX_BOOKS is the retune knob. See canAllocate() above for why probing first makes this
+  // reserve() non-aborting rather than merely less likely to abort.
+  const size_t entriesBytes = MAX_BOOKS * sizeof(Entry);
+  if (!canAllocate(entriesBytes)) {
+    LOG_ERR("FBL", "OOM: cannot reserve %zu bytes for %zu book entries", entriesBytes, MAX_BOOKS);
+    return false;
+  }
   entries.reserve(MAX_BOOKS);
 
   if (!nameBuffer) {
@@ -105,10 +140,23 @@ bool FlatBookList::scan(char* nameBuffer, size_t bufferSize) {
   }
 
   std::vector<std::string> dirStack;
-  dirStack.reserve(16);
+  // Reserved once at its hard cap (MAX_DIR_STACK) and never grown past it (see the push loop
+  // below), so — like entries above — this can only ever satisfy this single reserve() call.
+  const size_t dirStackBytes = MAX_DIR_STACK * sizeof(std::string);
+  if (!canAllocate(dirStackBytes)) {
+    LOG_ERR("FBL", "OOM: cannot reserve %zu bytes for directory stack", dirStackBytes);
+    // entries.reserve(MAX_BOOKS) above already succeeded, so entries.clear() alone would leave its
+    // ~31KB reserved-but-empty for the rest of the activity — exactly when the heap is already
+    // under pressure. swap() with a temporary is guaranteed non-allocating (unlike shrink_to_fit(),
+    // which is only a non-binding request) and actually releases the capacity.
+    std::vector<Entry>().swap(entries);
+    return false;
+  }
+  dirStack.reserve(MAX_DIR_STACK);
   dirStack.push_back("/");
 
   bool capped = false;
+  bool dirStackCapped = false;
   while (!dirStack.empty() && !capped) {
     const std::string currentPath = std::move(dirStack.back());
     dirStack.pop_back();
@@ -136,6 +184,13 @@ bool FlatBookList::scan(char* nameBuffer, size_t bufferSize) {
       entryPath += nameBuffer;
 
       if (file.isDirectory()) {
+        if (dirStack.size() >= MAX_DIR_STACK) {
+          if (!dirStackCapped) {
+            dirStackCapped = true;
+            LOG_ERR("FBL", "All-books scan: directory stack capped at %zu, some folders skipped", MAX_DIR_STACK);
+          }
+          continue;
+        }
         dirStack.push_back(std::move(entryPath));
         continue;
       }
