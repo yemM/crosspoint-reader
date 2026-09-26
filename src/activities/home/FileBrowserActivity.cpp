@@ -5,29 +5,93 @@
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Memory.h>
+#include <Utf8.h>
 
 #include <algorithm>
+#include <functional>
 
 #include "CrossPointSettings.h"
+#include "CrossPointState.h"
 #include "MappedInputManager.h"
+#include "RecentBooksStore.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
-#include "components/themes/BaseTheme.h"
+#include "components/UiAppHelpers.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
+#include "util/BookmarkUtil.h"
+
+namespace fui = freeink::ui;
 
 namespace {
 constexpr unsigned long GO_HOME_MS = 1000;
 constexpr size_t NAME_BUFFER_SIZE = 500;
 
-std::string basenameOf(const std::string& path) {
-  const auto pos = path.find_last_of('/');
-  return pos == std::string::npos ? path : path.substr(pos + 1);
+std::string getBookCachePath(const std::string& path) {
+  const char* prefix = nullptr;
+  if (FsHelpers::hasEpubExtension(path)) {
+    prefix = "epub_";
+  } else if (FsHelpers::hasXtcExtension(path)) {
+    prefix = "xtc_";
+  } else if (FsHelpers::hasTxtExtension(path) || FsHelpers::hasMarkdownExtension(path)) {
+    prefix = "txt_";
+  } else {
+    return "";
+  }
+  return std::string("/.crosspoint/") + prefix + std::to_string(std::hash<std::string>{}(path));
+}
+
+bool moveStatePath(const std::string& oldPath, const std::string& newPath, bool& moved) {
+  moved = false;
+  if (oldPath.empty() || !Storage.exists(oldPath.c_str())) return true;
+  if (Storage.exists(newPath.c_str())) {
+    LOG_ERR("FileBrowser", "Rename state target already exists: %s", newPath.c_str());
+    return false;
+  }
+  moved = Storage.rename(oldPath.c_str(), newPath.c_str());
+  if (!moved) LOG_ERR("FileBrowser", "Failed to move rename state: %s -> %s", oldPath.c_str(), newPath.c_str());
+  return moved;
+}
+
+void rollBackStatePath(const std::string& oldPath, const std::string& newPath, const bool moved) {
+  if (moved && !Storage.rename(newPath.c_str(), oldPath.c_str())) {
+    LOG_ERR("FileBrowser", "Failed to roll back rename state: %s -> %s", newPath.c_str(), oldPath.c_str());
+  }
 }
 }  // namespace
 
+std::string getFileExtension(const std::string& filename);
+
+void formatFileName(const std::string& filename, char* buffer, const size_t bufferSize) {
+  if (filename.empty()) {
+    buffer[0] = '\0';
+    return;
+  }
+  const bool isDirectory = filename.back() == '/';
+  const size_t dot = isDirectory ? filename.size() - 1 : filename.rfind('.');
+  const int length = static_cast<int>(dot == std::string::npos ? filename.size() : dot);
+  const char* format = isDirectory && !UITheme::getInstance().getTheme().showsFileIcons() ? "[%.*s]" : "%.*s";
+  snprintf(buffer, bufferSize, format, length, filename.c_str());
+  // Compose only the display copy; filesystem lookup needs the raw entry bytes.
+  utf8ComposeNfcInPlace(buffer);
+}
+
+void formatFileExtension(const std::string& filename, char* buffer, const size_t bufferSize) {
+  buffer[0] = '\0';
+  if (filename.empty() || filename.back() == '/') return;
+  if (const char* extension = strrchr(filename.c_str(), '.')) snprintf(buffer, bufferSize, "%s", extension);
+}
+
+FileBrowserActivity::FileBrowserActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                         std::string initialPath, const Mode mode)
+    : UiListActivity("FileBrowser", renderer, mappedInput, /*wantsTouchLongPress=*/true),
+      mode(mode),
+      basepath(initialPath.empty() ? "/" : std::move(initialPath)) {}
+
 void FileBrowserActivity::loadFiles() {
   files.clear();
+  prewarmedStart = -1;  // new folder contents: re-prewarm the visible window
 
   auto root = Storage.open(basepath.c_str());
   if (!root || !root.isDirectory()) {
@@ -42,14 +106,24 @@ void FileBrowserActivity::loadFiles() {
     return;
   }
 
+  // Size `files` once before the fill loop: doubling growth on a large folder
+  // holds the old and new string blocks live across the final realloc. The
+  // count-only pass reads no names, so filtered-out entries just over-reserve
+  // by a few slots.
+  size_t entryCount = 0;
+  for (auto file = root.openNextFile(); file; file = root.openNextFile()) ++entryCount;
+  root.rewindDirectory();
+  files.reserve(entryCount);
+
   for (auto file = root.openNextFile(); file; file = root.openNextFile()) {
     file.getName(fileNameBuffer.get(), NAME_BUFFER_SIZE);
+    const bool isDirectory = file.isDirectory();
     if ((!SETTINGS.showHiddenFiles && fileNameBuffer[0] == '.') ||
         strcmp(fileNameBuffer.get(), "System Volume Information") == 0) {
       continue;
     }
 
-    if (file.isDirectory()) {
+    if (isDirectory) {
       files.emplace_back(std::string(fileNameBuffer.get()) + "/");
     } else {
       std::string_view filename{fileNameBuffer.get()};
@@ -60,7 +134,7 @@ void FileBrowserActivity::loadFiles() {
         }
       } else if (FsHelpers::hasEpubExtension(filename) || FsHelpers::hasXtcExtension(filename) ||
                  FsHelpers::hasTxtExtension(filename) || FsHelpers::hasMarkdownExtension(filename) ||
-                 FsHelpers::hasBmpExtension(filename)) {
+                 FsHelpers::hasBmpExtension(filename) || FsHelpers::hasPngExtension(filename)) {
         files.emplace_back(filename);
       }
     }
@@ -69,27 +143,70 @@ void FileBrowserActivity::loadFiles() {
   FsHelpers::sortFileList(files);
 }
 
+// fui::ListProps::rowProvider — formats row `index` from files[index] into the
+// activity's scratch buffers on demand. Runs on the render task only for the
+// rows the list actually lays out, so nothing per-file is materialized beyond
+// `files` itself. The label/value pointers stay valid until the next call,
+// which is all the provider contract requires. The "[folder]" format is
+// theme-dependent, but it's re-derived here on every
+// repaint, so a theme change picked up while this activity was paused
+// underneath another screen needs no cache invalidation.
+void FileBrowserActivity::provideRow(void* ctx, const uint16_t index, fui::ListItem& item) {
+  auto* self = static_cast<FileBrowserActivity*>(ctx);
+  if (index >= self->files.size()) return;
+  const std::string& entry = self->files[index];
+  formatFileName(entry, self->rowNameBuf, sizeof(self->rowNameBuf));
+  item.label = self->rowNameBuf;
+  formatFileExtension(entry, self->rowExtBuf, sizeof(self->rowExtBuf));
+  if (self->rowExtBuf[0] != '\0') {
+    item.value = self->rowExtBuf;
+  }
+  item.icon = listIconFor(UITheme::getFileIcon(entry));
+  item.actionValue = static_cast<int16_t>(index);
+}
+
+// Batch-prewarm the CJK fallback glyphs for a bounded window of display names
+// starting at the viewport top — one SD pass per list page (the reader TOC's
+// refreshTocWindow pattern) instead of one unbounded pass over the whole
+// folder. Getter form: no concatenated copy (a bare-new string append aborts
+// under heap pressure). The last index covers the bottom path band: basepath
+// (possibly a CJK folder name) draws in the same small font, so it must live
+// in the same batch or it would evict the rows' glyphs when the heap gate
+// disables union merging. (prewarmFallbackText appends the truncation
+// ellipsis.)
+void FileBrowserActivity::prewarmRowGlyphs(const int start) {
+  const int total = static_cast<int>(files.size());
+  int clamped = start;
+  if (clamped > total - PREWARM_WINDOW) clamped = total - PREWARM_WINDOW;
+  if (clamped < 0) clamped = 0;
+  if (clamped == prewarmedStart) return;
+  prewarmedStart = clamped;
+  const int count = total - clamped < PREWARM_WINDOW ? total - clamped : PREWARM_WINDOW;
+
+  struct PrewarmCtx {
+    FileBrowserActivity* self;
+    int first;
+    int count;
+  } prewarmCtx{this, clamped, count};
+  renderer.prewarmFallbackText(
+      uiScaleSpec().smallFontId,
+      [](const void* ctx, uint32_t i) -> const char* {
+        auto* c = const_cast<PrewarmCtx*>(static_cast<const PrewarmCtx*>(ctx));
+        if (i < static_cast<uint32_t>(c->count)) {
+          formatFileName(c->self->files[c->first + i], c->self->rowNameBuf, sizeof(c->self->rowNameBuf));
+          return c->self->rowNameBuf;
+        }
+        return c->self->basepath.c_str();
+      },
+      &prewarmCtx, static_cast<uint32_t>(count) + 1);
+}
+
 void FileBrowserActivity::onEnter() {
-  Activity::onEnter();
+  UiListActivity::onEnter();
 
   fileNameBuffer = makeUniqueNoThrow<char[]>(NAME_BUFFER_SIZE);
   if (!fileNameBuffer) {
     LOG_ERR("FileBrowser", "malloc failed for name buffer");
-    return;
-  }
-
-  selectorIndex = 0;
-  indexAbortedPage = SIZE_MAX;
-  lockNextBackRelease = false;
-
-  // If Confirm was held while this activity opened (typical when launched from a menu), ignore
-  // its release — otherwise we'd immediately auto-open whatever is at index 0.
-  lockNextConfirmRelease = mappedInput.isPressed(MappedInputManager::Button::Confirm);
-
-  if (mode == Mode::Books && SETTINGS.browserFlatView) {
-    // Flat view takes priority over any preselected file path — see FileBrowserActivity.h.
-    enterAllBooksView(/*forceScan=*/true);
-    requestUpdate();
     return;
   }
 
@@ -98,129 +215,23 @@ void FileBrowserActivity::onEnter() {
     basepath = "/";
     loadFiles();
   } else if (!root.isDirectory()) {
-    lockLongPressBack = mappedInput.isPressed(MappedInputManager::Button::Back);
-
     const std::string oldPath = basepath;
     basepath = FsHelpers::extractFolderPath(basepath);
     loadFiles();
 
     const auto pos = oldPath.find_last_of('/');
     const std::string fileName = oldPath.substr(pos + 1);
-    selectorIndex = findEntry(fileName) + (hasTabBar() ? 1 : 0);
+    // The first screen build pulls the viewport to it (ListNav follow-on-build).
+    nav.selected = static_cast<int>(findEntry(fileName));
   } else {
     loadFiles();
   }
-
-  requestUpdate();
 }
 
 void FileBrowserActivity::onExit() {
   Activity::onExit();
   files.clear();
   fileNameBuffer.reset();
-  flatBooks.reset();
-  flatScanned = false;
-}
-
-bool FileBrowserActivity::inAllBooksView() const {
-  return hasTabBar() && SETTINGS.browserFlatView && flatBooks != nullptr;
-}
-
-size_t FileBrowserActivity::itemCount() const { return inAllBooksView() ? flatBooks->size() : files.size(); }
-
-// The listing area below the header/tab bar and above the path bar/button hints — same geometry
-// render() uses to lay out drawList/drawBookList/drawBookGrid. Shared here so getPageItems()
-// can't drift from what actually gets drawn.
-Rect FileBrowserActivity::listContentRect() const {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const int pathReserved = renderer.getLineHeight(SMALL_FONT_ID) + metrics.verticalSpacing;
-  const int contentTop = metrics.topPadding + metrics.headerHeight + (hasTabBar() ? metrics.tabBarHeight : 0);
-  const int contentHeight =
-      renderer.getScreenHeight() - contentTop - metrics.buttonHintsHeight - metrics.verticalSpacing - pathReserved;
-  return Rect{0, contentTop, renderer.getScreenWidth(), contentHeight};
-}
-
-int FileBrowserActivity::getPageItems() const {
-  const Rect rect = listContentRect();
-  const auto& metrics = UITheme::getInstance().getMetrics();
-
-  if (inAllBooksView() && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_COVERS) {
-    return std::max(1, rect.height / GUI.getBookListRowHeight());
-  }
-  if (inAllBooksView() && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_GRID) {
-    // Shared with drawBookGrid via computeBookGridLayout so the activity's page size and the
-    // theme's rendered layout can never diverge.
-    const BookGridLayout layout = GUI.computeBookGridLayout(rect);
-    return std::max(1, layout.cols * layout.rows);
-  }
-  const int rowHeight = inAllBooksView() ? metrics.listWithSubtitleRowHeight : metrics.listRowHeight;
-  return std::max(1, rect.height / rowHeight);
-}
-
-// Height (px) of the cached cover thumbnail the active flat-view style needs, or 0 if the style
-// shows no thumbnails at all (List). Passed straight through to FlatBookList so it resolves (and,
-// if the style/height changed since the last resolve, re-resolves) each row at the right size.
-int FileBrowserActivity::wantThumbHeight() const {
-  switch (SETTINGS.allBooksViewStyle) {
-    case CrossPointSettings::ALL_BOOKS_COVERS:
-      return BaseTheme::bookListThumbHeight;
-    case CrossPointSettings::ALL_BOOKS_GRID:
-      return BaseTheme::bookGridThumbHeight;
-    case CrossPointSettings::ALL_BOOKS_LIST:
-    default:
-      return 0;
-  }
-}
-
-void FileBrowserActivity::toggleViewMode() {
-  SETTINGS.browserFlatView = !SETTINGS.browserFlatView;
-  SETTINGS.saveToFile();
-  indexAbortedPage = SIZE_MAX;
-
-  if (SETTINGS.browserFlatView) {
-    enterAllBooksView(/*forceScan=*/false);
-  } else {
-    basepath = "/";
-    loadFiles();
-  }
-  // selectorIndex stays on the tab-bar slot (0) either way, mirroring SettingsActivity's
-  // category tab, which keeps its own slot 0 selected across category switches.
-}
-
-void FileBrowserActivity::enterAllBooksView(bool forceScan) {
-  if (!flatBooks) {
-    flatBooks = makeUniqueNoThrow<FlatBookList>();
-  }
-  if (!flatBooks) {
-    LOG_ERR("FileBrowser", "OOM allocating FlatBookList; falling back to folder view");
-    SETTINGS.browserFlatView = 0;
-    SETTINGS.saveToFile();
-    basepath = "/";
-    loadFiles();
-    return;
-  }
-
-  if (forceScan || !flatScanned) {
-    GUI.drawPopup(renderer, tr(STR_SCANNING_BOOKS));
-    flatScanned = flatBooks->scan(fileNameBuffer.get(), NAME_BUFFER_SIZE);
-    if (!flatScanned) {
-      // inAllBooksView() never consults flatScanned, so without this the user would toggle to All
-      // Books and land on a silent, unexplained empty list. Fall back the same way the !flatBooks
-      // OOM branch above does: drop back to folder view instead of a dead end.
-      LOG_ERR("FileBrowser", "OOM scanning all books; falling back to folder view");
-      // Destroy the list rather than relying on each scan() failure path to release its own
-      // reservations: entries.reserve(MAX_BOOKS) is ~31KB, and stranding it is worst precisely
-      // here, on the OOM path. Safe because inAllBooksView() already tolerates a null flatBooks,
-      // and flatScanned stays false so re-entering the view rescans from scratch.
-      flatBooks.reset();
-      SETTINGS.browserFlatView = 0;
-      SETTINGS.saveToFile();
-      basepath = "/";
-      loadFiles();
-      return;
-    }
-  }
-  indexAbortedPage = SIZE_MAX;
 }
 
 // To avoid traversing directories twice (once for cache clearing, once for deletion),
@@ -304,165 +315,257 @@ bool FileBrowserActivity::removeDirFile(const std::string& fullPath) {
   return true;
 }
 
-void FileBrowserActivity::loop() {
-  // Long press BACK (1s+) goes to root folder (Books mode, folder view only — flat view has no
-  // folder concept to go "up" out of; Back there always means Home, handled below).
-  if (mode == Mode::Books && !inAllBooksView() && mappedInput.isPressed(MappedInputManager::Button::Back) &&
-      mappedInput.getHeldTime() >= GO_HOME_MS && basepath != "/" && !lockLongPressBack) {
-    basepath = "/";
+void FileBrowserActivity::activateIndex(const int index) {
+  (void)index;  // base already synced nav.selected to the tapped row
+  // Activation navigates or opens; a lingering flash would gray an unrelated
+  // row on the next list.
+  app.clearTapFlash();
+  activateSelected();
+}
+
+void FileBrowserActivity::onRowLongPress(const int index) {
+  (void)index;  // base already synced nav.selected to the pressed row
+  app.clearTapFlash();
+  if (mode == Mode::Books) {
+    showEntryActions();
+  } else {
+    activateSelected();
+  }
+}
+
+void FileBrowserActivity::activateSelected() {
+  if (files.empty()) return;
+  // A touch activation can carry a row index captured before a delete/reload
+  // shrank the list; the next render re-registers the rows.
+  if (nav.selected < 0 || nav.selected >= listCount()) return;
+
+  const std::string& entry = files[nav.selected];
+  bool isDirectory = (entry.back() == '/');
+
+  // Firmware picker: select file -> return path; navigate into directories normally.
+  if (mode == Mode::PickFirmware && !isDirectory) {
+    std::string cleanBasePath = basepath;
+    if (cleanBasePath.back() != '/') cleanBasePath += "/";
+    ActivityResult res{FilePathResult{cleanBasePath + entry}};
+    res.isCancelled = false;
+    setResult(std::move(res));
+    finish();
+    return;
+  }
+
+  // buildScreen() runs on the render task and reads basepath plus `files`
+  // through the row provider; mutate only under the render lock.
+  RenderLock lock(*this);
+  if (basepath.back() != '/') basepath += "/";
+
+  if (isDirectory) {
+    basepath += entry.substr(0, entry.length() - 1);
     loadFiles();
-    selectorIndex = hasTabBar() ? 1 : 0;
+    nav.selected = 0;
+    nav.top = 0;
+    lock.unlock();
     requestUpdate();
+  } else {
+    const std::string fullPath = basepath + entry;
+    lock.unlock();  // onSelectBook launches an activity; don't hold the lock across it
+    onSelectBook(fullPath);
+  }
+}
+
+void FileBrowserActivity::showEntryActions() {
+  if (mode != Mode::Books || files.empty() || optionPopup.isActive() || nav.selected < 0 ||
+      nav.selected >= listCount()) {
     return;
   }
 
-  if (lockLongPressBack && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    lockLongPressBack = false;
+  const bool isDirectory = files[nav.selected].back() == '/';
+  static constexpr StrId FILE_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE, StrId::STR_RENAME};
+  static constexpr StrId DIRECTORY_OPTIONS[] = {StrId::STR_OPEN, StrId::STR_DELETE};
+  optionPopup.show(StrId::STR_FILENAME, isDirectory ? DIRECTORY_OPTIONS : FILE_OPTIONS, isDirectory ? 2 : 3, 0,
+                   [this](const int index) {
+                     if (index == 0) {
+                       activateSelected();
+                     } else if (index == 1) {
+                       deleteSelected();
+                     } else if (index == 2) {
+                       startRename();
+                     }
+                   });
+  requestUpdate();
+}
+
+void FileBrowserActivity::deleteSelected() {
+  if (files.empty() || nav.selected < 0 || nav.selected >= listCount()) return;
+
+  std::string cleanBasePath = basepath;
+  if (cleanBasePath.back() != '/') cleanBasePath += "/";
+  const std::string entry = files[nav.selected];
+  const std::string fullPath = cleanBasePath + entry;
+
+  auto handler = [this, fullPath](const ActivityResult& res) {
+    if (res.isCancelled) {
+      LOG_DBG("FileBrowser", "Delete cancelled by user");
+      return;
+    }
+
+    LOG_DBG("FileBrowser", "Attempting to delete: %s", fullPath.c_str());
+    if (!removeDirFile(fullPath)) {
+      LOG_ERR("FileBrowser", "Failed to delete: %s", fullPath.c_str());
+      return;
+    }
+
+    LOG_DBG("FileBrowser", "Deleted successfully");
+    {
+      RenderLock lock(*this);
+      loadFiles();
+      if (files.empty()) {
+        nav.selected = 0;
+      } else if (nav.selected >= listCount()) {
+        nav.selected = listCount() - 1;
+      }
+      nav.follow(listCount());
+    }
+    requestUpdate(true);
+  };
+
+  const std::string heading = tr(STR_DELETE) + std::string("? ");
+  auto confirmation = makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, heading, utf8ComposeNfc(entry));
+  if (!confirmation) {
+    LOG_ERR("FileBrowser", "OOM: delete confirmation");
+    return;
+  }
+  startActivityForResult(std::move(confirmation), std::move(handler));
+}
+
+void FileBrowserActivity::startRename() {
+  if (files.empty() || nav.selected < 0 || nav.selected >= listCount()) return;
+
+  const std::string oldEntry = files[nav.selected];
+  if (oldEntry.back() == '/') return;
+
+  std::string cleanBasePath = basepath;
+  if (cleanBasePath.back() != '/') cleanBasePath += "/";
+  const std::string oldPath = cleanBasePath + oldEntry;
+  const std::string extension = getFileExtension(oldEntry);
+  const std::string initialStem = utf8ComposeNfc(oldEntry.substr(0, oldEntry.size() - extension.size()));
+  const size_t maxStemLength = NAME_BUFFER_SIZE - extension.size() - 1;
+  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_RENAME), initialStem,
+                                                           maxStemLength, InputType::Text);
+  if (!keyboard) {
+    LOG_ERR("FileBrowser", "OOM: rename keyboard");
+    return;
+  }
+  startActivityForResult(std::move(keyboard), [this, oldPath, oldEntry, extension](const ActivityResult& result) {
+    if (result.isCancelled) return;
+    renameSelectedFile(oldPath, oldEntry, std::get<KeyboardResult>(result.data).text, extension);
+  });
+}
+
+void FileBrowserActivity::renameSelectedFile(const std::string& oldPath, const std::string& oldEntry,
+                                             const std::string& newStem, const std::string& extension) {
+  const std::string newEntry = newStem + extension;
+  if (newStem.empty() || newEntry.size() >= NAME_BUFFER_SIZE || !FsHelpers::isSafePathComponent(newEntry)) {
+    LOG_ERR("FileBrowser", "Invalid rename target: %s", newEntry.c_str());
+    return;
+  }
+  if (newEntry == utf8ComposeNfc(oldEntry)) return;
+
+  const std::string parentPath = FsHelpers::extractFolderPath(oldPath);
+  const std::string newPath = (parentPath == "/" ? parentPath : parentPath + "/") + newEntry;
+  if (Storage.exists(newPath.c_str())) {
+    LOG_ERR("FileBrowser", "Rename target already exists: %s", newPath.c_str());
     return;
   }
 
-  // Swallows the Back release that follows an aborted lazy-indexing pass (see render()) so it
-  // doesn't also trigger "go up a directory" / "go home" on the same press.
-  if (lockNextBackRelease && mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    lockNextBackRelease = false;
+  const std::string oldCachePath = getBookCachePath(oldPath);
+  const std::string newCachePath = getBookCachePath(newPath);
+  const bool isEpub = FsHelpers::hasEpubExtension(oldPath);
+  const std::string oldBookmarkPath = isEpub ? BookmarkUtil::getBookmarkPath(oldPath) : "";
+  const std::string newBookmarkPath = isEpub ? BookmarkUtil::getBookmarkPath(newPath) : "";
+  bool cacheMoved = false;
+  bool bookmarksMoved = false;
+  if (!moveStatePath(oldCachePath, newCachePath, cacheMoved)) return;
+  if (!moveStatePath(oldBookmarkPath, newBookmarkPath, bookmarksMoved)) {
+    rollBackStatePath(oldCachePath, newCachePath, cacheMoved);
+    return;
+  }
+  if (!Storage.rename(oldPath.c_str(), newPath.c_str())) {
+    LOG_ERR("FileBrowser", "Failed to rename file: %s -> %s", oldPath.c_str(), newPath.c_str());
+    rollBackStatePath(oldBookmarkPath, newBookmarkPath, bookmarksMoved);
+    rollBackStatePath(oldCachePath, newCachePath, cacheMoved);
     return;
   }
 
-  const int pageItems = getPageItems();
+  RECENT_BOOKS.updatePath(oldPath, newPath, oldCachePath, newCachePath);
+  if (APP_STATE.openEpubPath == oldPath) {
+    APP_STATE.openEpubPath = newPath;
+    if (!APP_STATE.saveToFile()) LOG_ERR("FileBrowser", "Failed to save renamed open-book path");
+  }
+
+  {
+    RenderLock lock(*this);
+    loadFiles();
+    nav.selected = static_cast<int>(findEntry(newEntry));
+    nav.follow(listCount());
+  }
+  requestUpdate(true);
+}
+
+bool FileBrowserActivity::handleCustomInput() {
+  if (optionPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return true;
+
+  // Long press BACK (1s+) goes to root folder (Books mode only).
+  // In firmware-pick mode we keep navigation simple: short Back = up dir / cancel.
+  if (mode == Mode::Books && mappedInput.wasReleased(MappedInputManager::Button::Back) &&
+      mappedInput.getHeldTime() >= GO_HOME_MS && basepath != "/") {
+    {
+      // buildScreen() runs on the render task and reads basepath plus `files`
+      // through the row provider; mutate only under the render lock.
+      RenderLock lock(*this);
+      basepath = "/";
+      loadFiles();
+      nav.selected = 0;
+      nav.top = 0;
+    }
+    requestUpdate();
+    return true;
+  }
+
+  return false;
+}
+
+bool FileBrowserActivity::handleButtons() {
+  if (mode == Mode::Books && mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, GO_HOME_MS)) {
+    app.clearTapFlash();
+    showEntryActions();
+    return true;
+  }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    if (lockNextConfirmRelease) {
-      lockNextConfirmRelease = false;
-      return;
-    }
-
-    if (hasTabBar() && selectorIndex == 0) {
-      toggleViewMode();
-      requestUpdate();
-      return;
-    }
-
-    if (inAllBooksView()) {
-      const auto& entries = flatBooks->getEntries();
-      const size_t rowIndex = selectorIndex - 1;
-      if (entries.empty() || rowIndex >= entries.size()) return;
-      const std::string path = entries[rowIndex].path;
-
-      if (mappedInput.getHeldTime() >= GO_HOME_MS) {
-        // --- LONG PRESS ACTION: DELETE BOOK ---
-        auto handler = [this, path, rowIndex](const ActivityResult& res) {
-          if (!res.isCancelled) {
-            LOG_DBG("FileBrowser", "Attempting to delete: %s", path.c_str());
-            if (removeDirFile(path)) {
-              LOG_DBG("FileBrowser", "Deleted successfully");
-              flatBooks->removeAt(rowIndex);
-              if (flatBooks->size() == 0) {
-                selectorIndex = 0;
-              } else if (rowIndex >= flatBooks->size()) {
-                // Move selection to the new "last" row (slot index = row + 1 for the tab bar).
-                selectorIndex = flatBooks->size();
-              }
-              indexAbortedPage = SIZE_MAX;
-              requestUpdate(true);
-            } else {
-              LOG_ERR("FileBrowser", "Failed to delete: %s", path.c_str());
-            }
-          } else {
-            LOG_DBG("FileBrowser", "Delete cancelled by user");
-          }
-        };
-
-        std::string heading = tr(STR_DELETE) + std::string("? ");
-        startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, basenameOf(path)),
-                               handler);
-        return;
-      }
-
-      // --- SHORT PRESS ACTION: OPEN ---
-      onSelectBook(path);
-      return;
-    }
-
-    if (files.empty()) return;
-
-    const size_t rowIndex = hasTabBar() ? selectorIndex - 1 : selectorIndex;
-    const std::string& entry = files[rowIndex];
-    bool isDirectory = (entry.back() == '/');
-
-    // Firmware picker: select file -> return path; navigate into directories normally.
-    if (mode == Mode::PickFirmware && !isDirectory) {
-      std::string cleanBasePath = basepath;
-      if (cleanBasePath.back() != '/') cleanBasePath += "/";
-      ActivityResult res{FilePathResult{cleanBasePath + entry}};
-      res.isCancelled = false;
-      setResult(std::move(res));
-      finish();
-      return;
-    }
-
-    if (mode == Mode::Books && mappedInput.getHeldTime() >= GO_HOME_MS) {
-      // --- LONG PRESS ACTION: DELETE FILE OR DIRECTORY ---
-      std::string cleanBasePath = basepath;
-      if (cleanBasePath.back() != '/') cleanBasePath += "/";
-      const std::string fullPath = cleanBasePath + entry;
-
-      auto handler = [this, fullPath, rowIndex](const ActivityResult& res) {
-        if (!res.isCancelled) {
-          LOG_DBG("FileBrowser", "Attempting to delete: %s", fullPath.c_str());
-          if (removeDirFile(fullPath)) {
-            LOG_DBG("FileBrowser", "Deleted successfully");
-            loadFiles();
-            if (files.empty()) {
-              selectorIndex = 0;
-            } else if (rowIndex >= files.size()) {
-              // Move selection to the new "last" item
-              selectorIndex = files.size() - 1 + (hasTabBar() ? 1 : 0);
-            }
-
-            requestUpdate(true);
-          } else {
-            LOG_ERR("FileBrowser", "Failed to delete: %s", fullPath.c_str());
-          }
-        } else {
-          LOG_DBG("FileBrowser", "Delete cancelled by user");
-        }
-      };
-
-      std::string heading = tr(STR_DELETE) + std::string("? ");
-
-      startActivityForResult(std::make_unique<ConfirmationActivity>(renderer, mappedInput, heading, entry), handler);
-      return;
-    } else {
-      // --- SHORT PRESS ACTION: OPEN/NAVIGATE ---
-      if (basepath.back() != '/') basepath += "/";
-
-      if (isDirectory) {
-        basepath += entry.substr(0, entry.length() - 1);
-        loadFiles();
-        selectorIndex = hasTabBar() ? 1 : 0;
-        requestUpdate();
-      } else {
-        onSelectBook(basepath + entry);
-      }
-    }
-    return;
+    activateSelected();
+    return true;
   }
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     // Short press: go up one directory, or go home if at root
     if (mappedInput.getHeldTime() < GO_HOME_MS) {
-      if (inAllBooksView()) {
-        onGoHome();
-      } else if (basepath != "/") {
+      if (basepath != "/") {
         const std::string oldPath = basepath;
 
-        basepath.replace(basepath.find_last_of('/'), std::string::npos, "");
-        if (basepath.empty()) basepath = "/";
-        loadFiles();
+        {
+          // buildScreen() runs on the render task and reads basepath plus `files`
+          // through the row provider; mutate only under the render lock.
+          RenderLock lock(*this);
+          basepath.replace(basepath.find_last_of('/'), std::string::npos, "");
+          if (basepath.empty()) basepath = "/";
+          loadFiles();
 
-        const auto pos = oldPath.find_last_of('/');
-        const std::string dirName = oldPath.substr(pos + 1) + "/";
-        selectorIndex = findEntry(dirName) + (hasTabBar() ? 1 : 0);
+          const auto pos = oldPath.find_last_of('/');
+          const std::string dirName = oldPath.substr(pos + 1) + "/";
+          nav.selected = static_cast<int>(findEntry(dirName));
+          nav.top = 0;
+          nav.follow(listCount());
+        }
 
         requestUpdate();
       } else if (mode == Mode::PickFirmware) {
@@ -475,92 +578,15 @@ void FileBrowserActivity::loop() {
         onGoHome();
       }
     }
+    return true;
   }
 
-  const int totalSlots = static_cast<int>(itemCount()) + (hasTabBar() ? 1 : 0);
-
-  // Grid shares the exact same linear, row-major navigation as List/Covers: drawBookGrid lays out
-  // slots row-major (col = slot % cols, row = slot / cols — see BaseTheme::drawBookGrid), so a plain
-  // ±1 walk already moves right across a row and wraps down to the next row, matching every other
-  // list in the app. NavNext/NavPrevious already compose both side buttons and front Left/Right,
-  // with the orientation-based axis flip handled in MappedInputManager::isNavDirectionSwapped.
-  buttonNavigator.onNextRelease([this, totalSlots] {
-    selectorIndex = ButtonNavigator::nextIndex(static_cast<int>(selectorIndex), totalSlots);
-    requestUpdate();
-  });
-
-  buttonNavigator.onPreviousRelease([this, totalSlots] {
-    selectorIndex = ButtonNavigator::previousIndex(static_cast<int>(selectorIndex), totalSlots);
-    requestUpdate();
-  });
-
-  // Hold-to-page-jump is shared by every style, grid included: NavNext/NavPrevious already compose
-  // both side buttons and front Left/Right (see MappedInputManager::mapButton), so this fires
-  // regardless of which physical button the user is holding.
-  //
-  // pageItems is a ROW count (see getPageItems()), but selectorIndex is a SLOT index: slot 0 is the
-  // tab bar and slots 1..itemCount() are rows (see rowSelIndex in render()). Doing the page-jump
-  // arithmetic directly on selectorIndex mixes the two spaces and misplaces or strands rows. So we
-  // convert slot -> row, run ButtonNavigator's page arithmetic in row space, then convert back,
-  // applying the tab-bar offset both ways. Mode::PickFirmware has no tab bar (hasTabBar() is false
-  // there), so slot space and row space already coincide and no conversion is needed — that path is
-  // left exactly as it was.
-  const bool tabBar = hasTabBar();
-  const int rowTotal = static_cast<int>(itemCount());
-
-  buttonNavigator.onNextContinuous([this, tabBar, rowTotal, pageItems] {
-    if (!tabBar) {
-      selectorIndex =
-          static_cast<size_t>(ButtonNavigator::nextPageIndex(static_cast<int>(selectorIndex), rowTotal, pageItems));
-      requestUpdate();
-      return;
-    }
-    if (rowTotal > 0) {
-      if (selectorIndex == 0) {
-        // Slot 0 is the tab bar itself: a forward hold jumps straight into row 0 (top of page 1).
-        selectorIndex = 1;
-      } else {
-        const int currentRow = static_cast<int>(selectorIndex) - 1;
-        const int nextRow = ButtonNavigator::nextPageIndex(currentRow, rowTotal, pageItems);
-        selectorIndex = static_cast<size_t>(nextRow) + 1;
-      }
-    }
-    requestUpdate();
-  });
-
-  buttonNavigator.onPreviousContinuous([this, tabBar, rowTotal, pageItems] {
-    if (!tabBar) {
-      selectorIndex =
-          static_cast<size_t>(ButtonNavigator::previousPageIndex(static_cast<int>(selectorIndex), rowTotal, pageItems));
-      requestUpdate();
-      return;
-    }
-    if (rowTotal > 0) {
-      // Slot 0 is the tab bar itself: a backward hold jumps to the top row of the LAST page, so
-      // every row stays reachable without needing to first step onto row 0.
-      if (selectorIndex == 0) {
-        const int lastPageStart = ((rowTotal - 1) / pageItems) * pageItems;
-        selectorIndex = static_cast<size_t>(lastPageStart) + 1;
-      } else {
-        const int currentRow = static_cast<int>(selectorIndex) - 1;
-        const int prevRow = ButtonNavigator::previousPageIndex(currentRow, rowTotal, pageItems);
-        selectorIndex = static_cast<size_t>(prevRow) + 1;
-      }
-    }
-    requestUpdate();
-  });
+  return false;
 }
 
-std::string getFileName(std::string filename) {
-  if (filename.back() == '/') {
-    filename.pop_back();
-    if (!UITheme::getInstance().getTheme().showsFileIcons()) {
-      return "[" + filename + "]";
-    }
-    return filename;
-  }
-  const auto pos = filename.rfind('.');
-  return filename.substr(0, pos);
+void FileBrowserActivity::render(RenderLock&& lock) {
+  if (optionPopup.processRender(renderer, mappedInput)) return;
+  UiListActivity::render(std::move(lock));
 }
 
 std::string getFileExtension(const std::string& filename) {
@@ -571,93 +597,23 @@ std::string getFileExtension(const std::string& filename) {
   return filename.substr(pos);
 }
 
-void FileBrowserActivity::render(RenderLock&&) {
-  renderer.clearScreen();
-
-  const auto pageWidth = renderer.getScreenWidth();
-  const auto pageHeight = renderer.getScreenHeight();
+void FileBrowserActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
+  // Content below the GUI.drawHeader band, above the button hints.
+  screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
+                                                static_cast<int16_t>(metrics.buttonHintsHeight), 0});
+  screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
-  const bool flatView = inAllBooksView();
-  const bool coversStyle = flatView && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_COVERS;
-  const bool gridStyle = flatView && SETTINGS.allBooksViewStyle == CrossPointSettings::ALL_BOOKS_GRID;
-
-  std::string headerTitle;
-  if (mode == Mode::PickFirmware) {
-    headerTitle = tr(STR_SELECT_FIRMWARE_FILE);
-  } else if (flatView) {
-    headerTitle = tr(STR_ALL_BOOKS);
-  } else {
-    headerTitle = (basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1);
-  }
-  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, headerTitle.c_str());
-
-  if (hasTabBar()) {
-    const std::vector<TabInfo> tabs = {
-        {tr(STR_FOLDERS), !flatView},
-        {tr(STR_ALL_BOOKS), flatView},
-    };
-    GUI.drawTabBar(renderer, Rect{0, metrics.topPadding + metrics.headerHeight, pageWidth, metrics.tabBarHeight}, tabs,
-                   selectorIndex == 0);
-  }
-
-  const Rect contentRect = listContentRect();
-  const int contentTop = contentRect.y;
-  const int contentHeight = contentRect.height;
-  const int pathLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-
-  const size_t total = itemCount();
-  const int rowSelIndex = hasTabBar() ? static_cast<int>(selectorIndex) - 1 : static_cast<int>(selectorIndex);
-
-  if (total == 0) {
-    const char* emptyMsg = (mode == Mode::PickFirmware) ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND);
-    renderer.drawText(UI_10_FONT_ID, metrics.contentSidePadding, contentTop + 20, emptyMsg);
-  } else if (flatView) {
-    const auto& entries = flatBooks->getEntries();
-    if (gridStyle) {
-      GUI.drawBookGrid(renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(entries.size()),
-                       rowSelIndex, [&entries](int index) {
-                         const auto& e = entries[index];
-                         return BookGridCellData{FlatBookList::displayTitle(e), e.thumbPath};
-                       });
-    } else if (coversStyle) {
-      GUI.drawBookList(renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(entries.size()),
-                       rowSelIndex, [&entries](int index) {
-                         const auto& e = entries[index];
-                         return BookListRowData{FlatBookList::displayTitle(e), e.author, e.thumbPath, UIIcon::Book};
-                       });
-    } else {
-      GUI.drawList(
-          renderer, Rect{0, contentTop, pageWidth, contentHeight}, static_cast<int>(entries.size()), rowSelIndex,
-          [&entries](int index) { return FlatBookList::displayTitle(entries[index]); },
-          [&entries](int index) { return entries[index].author; });
-    }
-  } else {
-    GUI.drawList(
-        renderer, Rect{0, contentTop, pageWidth, contentHeight}, files.size(), rowSelIndex,
-        [this](int index) { return getFileName(files[index]); }, nullptr,
-        [this](int index) { return UITheme::getFileIcon(files[index]); },
-        [this](int index) { return getFileExtension(files[index]); }, false);
-  }
-
-  // Full path display: for flat view this shows the selected book's parent folder rather than
-  // a browsing basepath (there is no folder concept to browse in the flat listing).
+  // Full path band at the bottom: separator on top, left-truncated so the
+  // deepest directory stays visible.
   {
-    const int pathY = pageHeight - metrics.buttonHintsHeight - metrics.verticalSpacing - pathLineHeight;
-    const int separatorY = pathY - metrics.verticalSpacing / 2;
-    renderer.drawLine(0, separatorY, pageWidth - 1, separatorY, 3, true);
-    const int pathMaxWidth = pageWidth - metrics.contentSidePadding * 2;
-
-    std::string pathValue = basepath;
-    if (flatView) {
-      const auto& entries = flatBooks->getEntries();
-      pathValue = (rowSelIndex >= 0 && static_cast<size_t>(rowSelIndex) < entries.size())
-                      ? FsHelpers::extractFolderPath(entries[rowSelIndex].path)
-                      : "/";
-    }
-
-    // Left-truncate so the deepest directory is always visible
-    const char* pathStr = pathValue.c_str();
+    const int pathLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+    const fui::Rect band = screen.takeBottom(static_cast<int16_t>(pathLineHeight + metrics.verticalSpacing));
+    screen.target().fill(fui::Rect{band.x, band.y, band.width, 3}, fui::Paint::solid(fui::Color::Black));
+    const int pathY =
+        band.y + metrics.verticalSpacing / 2 + (band.height - metrics.verticalSpacing / 2 - pathLineHeight) / 2;
+    const int pathMaxWidth = band.width - metrics.contentSidePadding * 2;
+    const char* pathStr = basepath.c_str();
     const char* pathDisplay = pathStr;
     char leftTruncBuf[256];
     if (renderer.getTextWidth(SMALL_FONT_ID, pathStr) > pathMaxWidth) {
@@ -674,58 +630,65 @@ void FileBrowserActivity::render(RenderLock&&) {
       snprintf(leftTruncBuf, sizeof(leftTruncBuf), "%s%s", ellipsis, p);
       pathDisplay = leftTruncBuf;
     }
-    renderer.drawText(SMALL_FONT_ID, metrics.contentSidePadding, pathY, pathDisplay);
+    renderer.drawText(SMALL_FONT_ID, band.x + metrics.contentSidePadding, pathY, pathDisplay);
   }
 
-  // Help text
-  const bool emptyForHints = flatView ? (total == 0) : files.empty();
-  const char* backLabel =
-      flatView ? tr(STR_HOME)
-               : ((basepath == "/") ? (mode == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK));
+  if (files.empty()) {
+    screen.centeredText(mode == Mode::PickFirmware ? tr(STR_NO_BIN_FILES) : tr(STR_NO_FILES_FOUND),
+                        screen.theme().bodyText);
+    return;
+  }
+
+  fui::ListProps props;
+  props.rowProvider = &FileBrowserActivity::provideRow;
+  props.rowProviderCtx = this;
+  props.count = static_cast<uint16_t>(files.size());
+  props.action = ACTION_ROW;
+  // Tap opens/navigates; long-press shows entry actions (physical buttons stay in loop()).
+  props.inputMask = fui::InputTouch | fui::InputLongPress;
+  props.valueInset = 8;  // air between the extension and the row edge
+  // Names use up to two small-font lines; shared list layout sizes each row.
+  fui::TextStyle label = screen.theme().smallText;
+  label.maxLines = 2;
+  props.labelText = label;
+
+  // The trailing value here is just the short extension: skip the balanced
+  // 60%-band wrap cap and let both name lines run the full width before it.
+  props.balanceWrappedLabelWithValue = false;
+  syncListViewport(screen, props);
+  // Prewarm the window at the final viewport (syncListViewport just applied
+  // follow/clamping to nav.top) before the list resolves rows through the
+  // provider.
+  prewarmRowGlyphs(nav.top);
+  screen.list(props);
+}
+
+void FileBrowserActivity::drawChrome() {
+  const auto pageWidth = renderer.getScreenWidth();
+  const auto& metrics = UITheme::getInstance().getMetrics();
+
+  std::string folderName =
+      (mode == Mode::PickFirmware)
+          ? std::string(tr(STR_SELECT_FIRMWARE_FILE))
+          : ((basepath == "/") ? std::string(tr(STR_SD_CARD)) : basepath.substr(basepath.rfind('/') + 1));
+  // Header via GUI.drawHeader (already FreeInkUI-themed) for the battery
+  // indicator; the rest of the screen renders through the app.
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, folderName.c_str());
+}
+
+void FileBrowserActivity::drawFooter() {
+  const char* backLabel = (basepath == "/") ? (mode == Mode::PickFirmware ? tr(STR_BACK) : tr(STR_HOME)) : tr(STR_BACK);
   // In PickFirmware mode, Confirm on a .bin returns the path to the caller (not "open"); show
   // STR_SELECT instead. Directories in the same picker still descend, so keep STR_OPEN there.
-  const bool selectingFirmwareFile =
-      mode == Mode::PickFirmware && !emptyForHints && rowSelIndex >= 0 && files[rowSelIndex].back() != '/';
-  const char* confirmLabel = emptyForHints ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
-  if (hasTabBar() && selectorIndex == 0) {
-    // On the tab bar row Confirm toggles Folders/All books, not open/navigate.
-    confirmLabel = tr(STR_TOGGLE);
-  }
-  const auto labels = mappedInput.mapLabels(backLabel, confirmLabel, emptyForHints ? "" : tr(STR_DIR_UP),
-                                            emptyForHints ? "" : tr(STR_DIR_DOWN));
+  const bool selectingFirmwareFile = mode == Mode::PickFirmware && !files.empty() && nav.selected >= 0 &&
+                                     nav.selected < listCount() && files[nav.selected].back() != '/';
+  const char* confirmLabel = files.empty() ? "" : (selectingFirmwareFile ? tr(STR_SELECT) : tr(STR_OPEN));
+  const auto labels = mappedInput.mapLabels(backLabel, confirmLabel, files.empty() ? "" : tr(STR_DIR_UP),
+                                            files.empty() ? "" : tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-
-  renderer.displayBuffer();
-
-  // Lazy metadata/thumbnail indexing for the visible page (flat view only). Runs after
-  // displayBuffer() so the (possibly stale) list is visible immediately; if any row actually
-  // needed work, requestUpdate() triggers a follow-up render showing the resolved data.
-  if (flatView && flatBooks) {
-    const int pageItems = getPageItems();
-    const size_t page = pageItems > 0 ? static_cast<size_t>(std::max(0, rowSelIndex)) / pageItems : 0;
-    const size_t start = page * static_cast<size_t>(pageItems);
-    const int thumbHeight = wantThumbHeight();
-
-    if (page != indexAbortedPage) {
-      indexAbortedPage = SIZE_MAX;  // moving to a different page always clears the suppression
-      if (flatBooks->pageNeedsWork(start, static_cast<size_t>(pageItems), thumbHeight)) {
-        bool aborted = false;
-        const bool changed = flatBooks->ensureVisibleMetadata(renderer, mappedInput, start,
-                                                              static_cast<size_t>(pageItems), thumbHeight, aborted);
-        if (aborted) {
-          indexAbortedPage = page;
-          lockNextBackRelease = true;
-        }
-        if (changed) {
-          requestUpdate();
-        }
-      }
-    }
-  }
 }
 
 size_t FileBrowserActivity::findEntry(const std::string& name) const {
-  for (size_t i = 0; i < files.size(); i++)
-    if (files[i] == name) return i;
-  return 0;
+  const auto entry = std::find(files.begin(), files.end(), name);
+  return entry != files.end() ? static_cast<size_t>(entry - files.begin()) : 0;
 }
