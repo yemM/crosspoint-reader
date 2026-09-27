@@ -841,7 +841,9 @@ bool Epub::generateThumbBmpForCover(int height, const std::string& coverImageHre
       Storage.remove(getThumbBmpPath(height).c_str());
     }
     LOG_DBG("EBP", "Generated thumb BMP from JPG cover image, success: %s", success ? "yes" : "no");
-    return success;
+    if (success) return true;
+    // Fall through to the empty marker: callers only check that the thumb
+    // exists, so a missing file would retry the slow decode on every visit.
   } else if (FsHelpers::hasPngExtension(coverImageHref)) {
     LOG_DBG("EBP", "Generating thumb BMP from PNG cover image");
     const auto coverPngTempPath = getCachePath() + "/.cover.png";
@@ -876,7 +878,9 @@ bool Epub::generateThumbBmpForCover(int height, const std::string& coverImageHre
       Storage.remove(getThumbBmpPath(height).c_str());
     }
     LOG_DBG("EBP", "Generated thumb BMP from PNG cover image, success: %s", success ? "yes" : "no");
-    return success;
+    if (success) return true;
+    // Fall through to the empty marker: callers only check that the thumb
+    // exists, so a missing file would retry the slow decode on every visit.
   } else {
     LOG_ERR("EBP", "Cover image is not a supported format, skipping thumbnail");
   }

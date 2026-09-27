@@ -159,9 +159,10 @@ void HomeActivity::loadGridCover(RecentBook& book, int height, bool& showingLoad
   book.coverBmpPath.clear();
 }
 
-void HomeActivity::loadRecentCovers(int coverHeight) {
+bool HomeActivity::loadRecentCovers(int coverHeight) {
   recentsLoading = true;
   bool showingLoading = false;
+  bool coverPathChanged = false;
   Rect popupRect;
 
   int progress = 0;
@@ -170,7 +171,9 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
     // would rescale the dithered thumb at draw time and alias badly.
     const int thumbHeight = coverGridUi ? coverGridUi->thumbHeightFor() : coverHeight;
     if (coverGridUi) {
+      const bool hadCover = !book.coverBmpPath.empty();
       loadGridCover(book, thumbHeight, showingLoading, popupRect);
+      coverPathChanged |= hadCover != !book.coverBmpPath.empty();
       ++progress;
       if (showingLoading) GUI.fillPopupProgress(renderer, popupRect, progress * 100 / recentBooks.size());
       continue;
@@ -223,6 +226,9 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 
   recentsLoaded = true;
   recentsLoading = false;
+  // The popup overwrote the framebuffer, and a new or dropped thumb changes
+  // what the covers show: either way the caller has to redraw.
+  return showingLoading || coverPathChanged;
 }
 
 void HomeActivity::onEnter() {
@@ -465,20 +471,15 @@ void HomeActivity::render(RenderLock&&) {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     renderer.displayBuffer(cleanInitialRefresh && !firstRenderDone ? HalDisplay::HALF_REFRESH
                                                                    : HalDisplay::FAST_REFRESH);
-    // Slot heights are recorded during the draw above; a change (first layout
-    // pass, orientation switch) means the paths must point at those sizes and
-    // any missing thumbs must be generated. Refreshing the paths right away
-    // lets the next pass draw already-cached thumbs before generation runs.
-    const bool coverSpecChanged = coverGridUi->takeThumbHeightChanged();
-    if (coverSpecChanged) {
-      coverGridUi->refreshCoverPaths();
-      recentsLoaded = false;
-    }
-    if (!firstRenderDone) {
-      firstRenderDone = true;
-      requestUpdate();
-    } else if (!recentsLoaded && !recentsLoading) {
-      loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT);
+    // Slot heights are recorded during the draw above, which already pointed
+    // the paths at those sizes and painted every cached thumb. A change (first
+    // layout pass, orientation switch) means missing thumbs must be generated.
+    if (coverGridUi->takeThumbHeightChanged()) recentsLoaded = false;
+    firstRenderDone = true;
+    // The screen is already up, so the missing-thumb check runs right away
+    // instead of costing another refresh. Redraw only when it changed
+    // something: once every thumb exists, entering home is a single refresh.
+    if (!recentsLoaded && !recentsLoading && loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT)) {
       coverGridUi->refreshCoverPaths();
       requestUpdate();
     }
