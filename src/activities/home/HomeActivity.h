@@ -71,7 +71,7 @@ class HomeActivity final : public Activity {
   bool restoreCoverBuffer();  // Restore frame buffer from stored cover
   void freeCoverBuffer();     // Free the stored cover buffer
   void loadRecentBooks(int maxBooks);
-  void loadRecentCovers(int coverHeight);
+  bool loadRecentCovers(int coverHeight);  // True when covers must be redrawn
   void fillCoverGridFromLibrary();
   void resolveGridCoverPaths();
   void loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect);
