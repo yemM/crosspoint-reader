@@ -141,7 +141,7 @@ On a button-only device:
 
 On a touch device, tap tabs, books, and the Search icon directly. Tap an active indexed tab again to reverse its sort direction. Swipe to scroll. Long-press a book in the Recent view to remove it from the list. Long-press a book in a Title or Author view to collapse to the group list, then tap a group to expand it. The **Added** view is not grouped; tapping or long-pressing a book opens it.
 
-The index is created automatically the first time the Library is opened. To pick up later file changes or updated metadata, use **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books.
+The index is created automatically the first time the Library is opened. To pick up later file changes or updated metadata, use **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books. Turn on **Settings → System → Show Covers in Library** to see each book's cover beside its title instead of the file icon.
 
 ### 3.5 File Transfer Screen
 
@@ -338,6 +338,8 @@ The Settings screen allows you to configure the device's behavior. There are a f
 - **Clear Reading Cache**: Clear the internal SD card cache.
 
 - **Use book metadata**: Read the title and author stored inside each book when the Library index is rebuilt. When disabled or unavailable, the Library uses the filename.
+
+- **Show Covers in Library**: Show each book's cover beside its title in the Library. Rows are taller, so fewer books fit on a page. The first time a page shows books whose covers have not been prepared yet, a loading popup appears while they are made; after that the page opens instantly. Books without a cover keep their file icon.
 
 - **Rebuild library index**: Rescan the SD card for books while preserving the arrival history of books already in the index.
 

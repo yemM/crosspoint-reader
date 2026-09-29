@@ -25,12 +25,16 @@
 #include "components/icons/search32.h"
 #include "fontIds.h"
 #include "util/BookCacheUtils.h"
+#include "util/CoverCanvas.h"
 
 namespace fui = freeink::ui;
 
 namespace {
 constexpr int SIDE_PADDING = 12;
 constexpr unsigned long LONG_PRESS_MS = 1000;
+// Cover rows: air above and below the cover, and between cover and text.
+constexpr int COVER_ROW_PADDING = 4;
+constexpr int COVER_TEXT_GAP = 12;
 
 constexpr int RECENT_TAB = 0;
 constexpr int TITLE_TAB = 1;
@@ -104,6 +108,7 @@ void LibraryListActivity::onEnter() {
     LOG_ERR("LIB", "index was built without duplicate detection");
   }
   resolvePinned();
+  if (SETTINGS.libraryShowCovers) covers.begin();
 
   // Entered while Confirm was still held (typical when launched from the home
   // menu): ignore its release, or we would open whatever sits at row 0.
@@ -113,6 +118,7 @@ void LibraryListActivity::onEnter() {
 
 void LibraryListActivity::onExit() {
   index.close();
+  covers.end();
   Activity::onExit();
 }
 
@@ -190,24 +196,28 @@ void LibraryListActivity::refreshOverlap() {
   std::sort(overlapRows, overlapRows + overlapCount);
 }
 
+bool LibraryListActivity::bookPathFor(const int entry, std::string& path) {
+  path.clear();
+  if (entry < pinnedCount()) {
+    const auto& books = RECENT_BOOKS.getBooks();
+    if (entry < 0 || entry >= static_cast<int>(books.size())) return false;
+    path = books[static_cast<size_t>(entry)].path;
+    return true;
+  }
+  if (!index.isOpen()) return false;
+  const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(entry)));
+  if (ordinal == 0xFFFF) return false;
+  library::ClixRecord record{};
+  if (!index.readRecord(ordinal, record) || !index.readPath(record, path)) {
+    LOG_ERR("LIB", "cannot resolve path for row %d", entry);
+    return false;
+  }
+  return true;
+}
+
 void LibraryListActivity::openSelectedBook() {
   std::string path;
-  if (selectedEntry() < pinnedCount()) {
-    const auto& books = RECENT_BOOKS.getBooks();
-    if (selectedEntry() >= static_cast<int>(books.size())) return;
-    path = books[static_cast<size_t>(selectedEntry())].path;
-  } else {
-    if (!index.isOpen()) return;
-    const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(selectedEntry())));
-    if (ordinal == 0xFFFF) return;
-
-    library::ClixRecord record{};
-    if (!index.readRecord(ordinal, record) || !index.readPath(record, path)) {
-      LOG_ERR("LIB", "cannot resolve path for row %d", selectedEntry());
-      return;
-    }
-  }
-  openBookByPath(path);
+  if (bookPathFor(selectedEntry(), path)) openBookByPath(path);
 }
 
 // Shared by row activation and the options menu: the reader screen this opens
@@ -685,10 +695,12 @@ void LibraryListActivity::rebuildActionTrampoline(const fui::ActionEvent&, void*
 // Title and author for one entry, read straight from the index. Only ever
 // called for rows about to be drawn, so at most a screenful of strings exists
 // at once.
-bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::string& author, std::string* fileName) {
+bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::string& author, std::string* fileName,
+                                     uint64_t* pathHash) {
   title.clear();
   author.clear();
   if (fileName) fileName->clear();
+  if (pathHash) *pathHash = 0;
   if (entry < pinnedCount()) {
     const auto& books = RECENT_BOOKS.getBooks();
     if (entry < 0 || entry >= static_cast<int>(books.size())) return false;
@@ -696,6 +708,7 @@ bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::s
     title = book.title;
     author = book.author;
     if (fileName) *fileName = book.path;
+    if (pathHash) *pathHash = library::clixPathHash(book.path.data(), book.path.size());
     return true;
   }
   const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(entry)));
@@ -709,6 +722,7 @@ bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::s
     // The stored title when the book gave one, the filename otherwise.
     if (!index.readTitle(record, title) || title.empty()) index.readName(record, title);
     if (fileName) index.readName(record, *fileName);
+    if (pathHash && !index.readPathHash(record, *pathHash)) *pathHash = 0;
   }
   if (title.empty()) title = tr(STR_LIBRARY_UNKNOWN_TITLE);
   return true;
@@ -817,7 +831,23 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
   // rows edge-to-edge.
   props.rowGap = std::max<int16_t>(screen.theme().listRowGap, 6);
   props.headerUnderline = false;
+  // Group headings carry no icon, so they keep the compact rows.
+  const bool showCovers = covers.ready() && !groupsCollapsed;
+  if (showCovers) {
+    // The cover canvas is square with the cover at its left edge; the negative
+    // part of the gap pulls the text back over the canvas's blank side. list()
+    // accepts that as long as rows carry no value/toggle slot and the list is
+    // not RTL (the blank side would then face the text). The explicit row
+    // height also lets the viewport estimate count cover rows.
+    props.iconSize = cover_canvas::SIZE;
+    props.textGap = COVER_TEXT_GAP - (cover_canvas::SIZE - cover_canvas::COVER_WIDTH);
+    props.rowHeight = cover_canvas::SIZE + 2 * COVER_ROW_PADDING;
+    covers.beginBuild();
+  }
   syncTabListViewport(screen, props);
+  // Invert-fill themes draw the selected row's icon in white on black; its
+  // cover gets a flipped copy so it does not show as a negative.
+  const bool coverDrawnWhite = screen.theme().listSelectionStyle == fui::SelectionStyle::InvertFill;
 
   // Keep one extra entry in the reusable window for a clipped trailing row.
   const size_t cap = static_cast<size_t>(nav.visibleRows > 0 ? nav.visibleRows : 1) + 1;
@@ -832,6 +862,10 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
   uint32_t previousInitial = 0;
   std::string rowFile;
   rowFile.reserve(128);
+  // Only resolved for a book whose cover is not cached yet: a path costs a
+  // walk over the index's folder records.
+  std::string coverPath;
+  uint64_t coverKey = 0;
   // Capture this after syncTabListViewport(), which may clamp nav.top.
   const int windowStart = static_cast<int>(props.topIndex);
   for (int entry = windowStart; entry < count && rows < static_cast<int>(cap); entry++) {
@@ -847,7 +881,7 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
         formatInitialHeading(titleInitialFor(bookEntry), title);
       }
     } else {
-      if (!rowTextFor(entry, title, author, &rowFile)) continue;
+      if (!rowTextFor(entry, title, author, &rowFile, showCovers ? &coverKey : nullptr)) continue;
       uint32_t initial = 0;
       bool startsGroup = false;
       if (authorGrouped) {
@@ -869,8 +903,13 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
     }
 
     item.label = title.c_str();
-    // Group headings stay bare; every book row gets its file-type icon.
-    if (!groupsCollapsed && !rowFile.empty()) item.icon = listIconFor(UITheme::getFileIcon(rowFile), 32);
+    // Group headings stay bare; every book row gets its cover or file-type icon.
+    if (showCovers && coverKey != 0) {
+      if (covers.contains(coverKey) || !bookPathFor(entry, coverPath)) coverPath.clear();
+      item.icon = covers.coverFor(coverKey, coverPath, coverDrawnWhite && entry == props.selectedIndex);
+    } else if (!groupsCollapsed && !rowFile.empty()) {
+      item.icon = listIconFor(UITheme::getFileIcon(rowFile), 32);
+    }
     item.actionValue = static_cast<int16_t>(entry);
     winItems.push_back(item);
     rows++;
@@ -1024,6 +1063,9 @@ void LibraryListActivity::drawHoldHelp() const {
 void LibraryListActivity::render(RenderLock&& lock) {
   if (optionPopup.processRender(renderer, mappedInput)) return;
   UiTabListActivity::render(std::move(lock));
+  // Covers the page needed but the card had no thumb for: make them now that
+  // the list is up, then redraw with them in place.
+  if (covers.generateMissing(renderer)) requestUpdate();
 }
 
 void LibraryListActivity::drawFooter() {

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "LibraryCoverCache.h"
 #include "RecentBooksStore.h"
 #include "activities/UiTabListActivity.h"
 #include "components/OptionPopup.h"
@@ -105,7 +106,12 @@ class LibraryListActivity final : public UiTabListActivity {
   int rowFor(int entry) const;
   // fileName, when asked for, is the on-card name the row's icon derives from
   // (the display title may come from metadata and carry no extension).
-  bool rowTextFor(int entry, std::string& title, std::string& author, std::string* fileName = nullptr);
+  // pathHash is the book's library::clixPathHash, the cover cache key.
+  bool rowTextFor(int entry, std::string& title, std::string& author, std::string* fileName = nullptr,
+                  uint64_t* pathHash = nullptr);
+  // Full path on the card. Walks the index's folder records, so it is only
+  // for opening a book or loading a cover the first time, never per render.
+  bool bookPathFor(int entry, std::string& path);
   uint32_t titleInitialFor(int entry);
   bool buildGroupStarts();
   int groupForBook(int bookEntry) const;
@@ -189,4 +195,8 @@ class LibraryListActivity final : public UiTabListActivity {
   // Row options modal (Recent long-press menu); owned here so it outlives the
   // touch event that opened it.
   OptionPopup optionPopup;
+
+  // Book covers in place of the file-type icons (Settings > System). Only
+  // allocated while the setting is on.
+  LibraryCoverCache covers;
 };
