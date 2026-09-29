@@ -1,6 +1,7 @@
 #include "LibraryListActivity.h"
 
 #include <FreeInkUIIcon.h>
+#include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
@@ -325,7 +326,66 @@ void LibraryListActivity::promptRebuildIndex() {
   rebuildIndex();
   if (!index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot open library index");
   resetAfterRebuild();
+  prepareAllCovers();
   requestUpdate(true);
+}
+
+// With covers on, Refresh library also makes every missing list thumb, newest
+// books first, so paging never stops for the loading popup. Any button, a
+// screen tap or the Home key stops it (the X4 Pro has no Back button); the rest
+// are then made page by page as before. Runs under the caller's RenderLock,
+// with the index freshly open.
+void LibraryListActivity::prepareAllCovers() {
+  if (!covers.ready() || !index.isOpen() || degraded) return;
+  const uint16_t total = index.bookCount();
+  if (total == 0) return;
+  const Rect popup = GUI.drawPopup(renderer, tr(STR_LIBRARY_PREPARING_COVERS));
+  GUI.fillPopupProgress(renderer, popup, 0);
+  int shownPercent = 0;
+  int generated = 0;
+  std::string path;
+  library::ClixRecord record{};
+  // A button still held from choosing Refresh must not stop the pass on its
+  // release, so only a press that starts during the pass counts.
+  bool pressedDuringPass = false;
+  for (uint16_t row = 0; row < total; ++row) {
+    // Not deferred: a Home tap here only stops the pass. Buttons and taps stop
+    // it on release, so the list never sees half of the gesture (a lift that
+    // opens the book under the finger, a release that moves the selection).
+    mappedInput.update();
+    pressedDuringPass |= mappedInput.wasAnyPressed();
+    int tapX = 0;
+    int tapY = 0;
+    if ((pressedDuringPass && mappedInput.wasAnyReleased()) || mappedInput.wasScreenTapped(tapX, tapY) ||
+        mappedInput.homeButtonAction() != HomeButtonAction::Ignore) {
+      LOG_INF("LIB", "cover preparation stopped at %u/%u", static_cast<unsigned>(row), static_cast<unsigned>(total));
+      break;
+    }
+    const uint16_t ordinal = index.ordinalForRow(library::SortOrder::RecentDesc, row);
+    uint64_t key = 0;
+    bool made = false;
+    // The path costs a folder walk, so the thumb check comes first only where
+    // it is cheap: the extension is on the name.
+    if (ordinal != 0xFFFF && index.readRecord(ordinal, record) && index.readName(record, path) &&
+        (FsHelpers::hasEpubExtension(path) || FsHelpers::hasXtcExtension(path)) && index.readPathHash(record, key) &&
+        index.readPath(record, path) && LibraryCoverCache::thumbMissing(path)) {
+      covers.generateFor(key, path);
+      made = true;
+      ++generated;
+    }
+    // Each progress update is a display refresh: redraw after a generated
+    // thumb or every 10%, not for every book that already has one.
+    const int percent = (row + 1) * 100 / total;
+    if (made || percent >= shownPercent + 10) {
+      GUI.fillPopupProgress(renderer, popup, percent);
+      shownPercent = percent;
+    }
+    // Lets the idle task run through a long pass over an already covered card.
+    delay(1);
+  }
+  LOG_INF("LIB", "prepared %d cover thumbs", generated);
+  // Nothing still held from the pass may act on the list.
+  swallowHeldReleases();
 }
 
 void LibraryListActivity::resetAfterRebuild() {

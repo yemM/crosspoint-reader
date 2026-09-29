@@ -1,4 +1,4 @@
-add_executable(CoverCanvasTest CoverCanvasTest.cpp)
+add_executable(CoverCanvasTest CoverCanvasTest.cpp CoverSlotsTest.cpp)
 
 target_include_directories(CoverCanvasTest PRIVATE ../../src)
 

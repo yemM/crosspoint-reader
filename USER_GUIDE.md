@@ -339,7 +339,7 @@ The Settings screen allows you to configure the device's behavior. There are a f
 
 - **Use book metadata**: Read the title and author stored inside each book when the Library index is rebuilt. When disabled or unavailable, the Library uses the filename.
 
-- **Show Covers in Library**: Show each book's cover beside its title in the Library. Rows are taller, so fewer books fit on a page. The first time a page shows books whose covers have not been prepared yet, a loading popup appears while they are made; after that the page opens instantly. Books without a cover keep their file icon.
+- **Show Covers in Library**: Show each book's cover beside its title in the Library. Rows are taller, so fewer books fit on a page. The first time a page shows books whose covers have not been prepared yet, a loading popup appears while they are made; after that the page opens instantly. To prepare every cover at once, use **Refresh library** from the Library; press any button or tap the screen to stop early. Books without a cover keep their file icon.
 
 - **Rebuild library index**: Rescan the SD card for books while preserving the arrival history of books already in the index.
 

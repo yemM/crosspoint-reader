@@ -68,18 +68,17 @@ bool LibraryCoverCache::begin() {
     LOG_ERR("LIB", "OOM: cover canvases; showing icons");
     return false;
   }
-  slots.fill(Slot{});
-  triedCount = 0;
-  triedNext = 0;
-  buildStamp = 0;
+  table.clear();
+  data.fill(SlotData{});
+  tried.clear();
   return true;
 }
 
 void LibraryCoverCache::end() {
   pixels.reset();
-  slots.fill(Slot{});
-  triedCount = 0;
-  triedNext = 0;
+  table.clear();
+  data.fill(SlotData{});
+  tried.clear();
 }
 
 uint8_t* LibraryCoverCache::canvasFor(const int slot) const {
@@ -88,52 +87,20 @@ uint8_t* LibraryCoverCache::canvasFor(const int slot) const {
 
 uint8_t* LibraryCoverCache::invertedCanvas() const { return canvasFor(SLOT_COUNT); }
 
-int LibraryCoverCache::findSlot(const uint64_t key) const {
-  for (int i = 0; i < SLOT_COUNT; ++i) {
-    if (slots[i].state != SlotState::Empty && slots[i].key == key) return i;
-  }
-  return -1;
-}
-
-int LibraryCoverCache::claimSlot() {
-  int victim = -1;
-  for (int i = 0; i < SLOT_COUNT; ++i) {
-    if (slots[i].state == SlotState::Empty) return i;
-    // Rows of the build in progress still point at their canvases.
-    if (slots[i].lastUse == buildStamp) continue;
-    if (victim < 0 || slots[i].lastUse < slots[victim].lastUse) victim = i;
-  }
-  return victim;
-}
-
-bool LibraryCoverCache::wasTried(const uint64_t key) const {
-  for (int i = 0; i < triedCount; ++i) {
-    if (tried[i] == key) return true;
-  }
-  return false;
-}
-
-void LibraryCoverCache::markTried(const uint64_t key) {
-  tried[triedNext] = key;
-  triedNext = static_cast<uint8_t>((triedNext + 1) % TRIED_COUNT);
-  if (triedCount < TRIED_COUNT) ++triedCount;
-}
-
 fui::BitmapRef LibraryCoverCache::coverFor(const uint64_t key, const std::string& path, const bool inverted) {
   if (!pixels) return {};
-  int slot = findSlot(key);
-  if (slot < 0) {
+  int slot = table.find(key);
+  if (slot >= 0) {
+    table.touch(slot);
+  } else {
     if (path.empty()) return {};
-    slot = claimSlot();
+    slot = table.claim(key);
     if (slot < 0) return {};
-    slots[slot] = Slot{};
-    slots[slot].key = key;
-    slots[slot].path = path;
+    data[slot].path = path;
     load(slot);
   }
-  slots[slot].lastUse = buildStamp;
   // Only real art needs flipping: the placeholder is line art like any icon.
-  if (inverted && slots[slot].state == SlotState::Cover) {
+  if (inverted && data[slot].state == SlotState::Cover) {
     cover_canvas::invert(canvasFor(slot), invertedCanvas());
     return canvasBitmap(invertedCanvas());
   }
@@ -141,7 +108,7 @@ fui::BitmapRef LibraryCoverCache::coverFor(const uint64_t key, const std::string
 }
 
 void LibraryCoverCache::load(const int slot) {
-  auto& entry = slots[slot];
+  auto& entry = data[slot];
   uint8_t* canvas = canvasFor(slot);
   const std::string thumbPath = thumbPathFor(entry.path);
   if (thumbPath.empty()) {
@@ -203,9 +170,12 @@ void LibraryCoverCache::drawPlaceholder(const std::string& path, uint8_t* canvas
 
 bool LibraryCoverCache::generateMissing(const GfxRenderer& renderer) {
   if (!pixels) return false;
+  const auto pending = [this](const int slot) {
+    return table.touchedThisBuild(slot) && data[slot].state == SlotState::Missing && !tried.contains(table.keyAt(slot));
+  };
   int total = 0;
-  for (const auto& slot : slots) {
-    if (slot.state == SlotState::Missing && slot.lastUse == buildStamp && !wasTried(slot.key)) ++total;
+  for (int i = 0; i < SLOT_COUNT; ++i) {
+    if (pending(i)) ++total;
   }
   if (total == 0) return false;
 
@@ -213,14 +183,26 @@ bool LibraryCoverCache::generateMissing(const GfxRenderer& renderer) {
   GUI.fillPopupProgress(renderer, popup, 0);
   int done = 0;
   for (int i = 0; i < SLOT_COUNT; ++i) {
-    auto& slot = slots[i];
-    if (slot.state != SlotState::Missing || slot.lastUse != buildStamp || wasTried(slot.key)) continue;
+    if (!pending(i)) continue;
     // Tried once per visit: a book whose cover cannot be made must not bring
     // the popup back on every redraw.
-    markTried(slot.key);
-    if (!generateThumb(slot.path)) LOG_ERR("LIB", "no cover thumb for %s", slot.path.c_str());
+    tried.add(table.keyAt(i));
+    if (!generateThumb(data[i].path)) LOG_ERR("LIB", "no cover thumb for %s", data[i].path.c_str());
     load(i);
     GUI.fillPopupProgress(renderer, popup, ++done * 100 / total);
   }
   return true;
+}
+
+bool LibraryCoverCache::thumbMissing(const std::string& path) {
+  const std::string thumbPath = thumbPathFor(path);
+  return !thumbPath.empty() && !Storage.exists(thumbPath.c_str());
+}
+
+void LibraryCoverCache::generateFor(const uint64_t key, const std::string& path) {
+  tried.add(key);
+  if (!generateThumb(path)) LOG_ERR("LIB", "no cover thumb for %s", path.c_str());
+  if (!pixels) return;
+  const int slot = table.find(key);
+  if (slot >= 0) load(slot);
 }

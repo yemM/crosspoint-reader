@@ -76,6 +76,8 @@ class LibraryListActivity final : public UiTabListActivity {
   // Shared tail of row activation and the options menu's Open entry.
   void openBookByPath(const std::string& path);
   void promptRebuildIndex();
+  // Generates every missing cover thumb after a manual refresh (covers on).
+  void prepareAllCovers();
   void resetAfterRebuild();
   // Recent-row long-press menu: open / remove from recents / delete / rebuild.
   void showRecentBookOptions(int entry);
