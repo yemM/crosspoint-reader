@@ -22,6 +22,7 @@
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "components/CoverGridHomeUi.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -39,7 +40,7 @@ int HomeActivity::getMenuItemCount() const {
 void HomeActivity::loadRecentBooks(int maxBooks) {
   recentBooks.clear();
   const auto& books = RECENT_BOOKS.getBooks();
-  recentBooks.reserve(coverGridUi ? maxBooks : std::min(static_cast<int>(books.size()), maxBooks));
+  recentBooks.reserve(homeUi ? maxBooks : std::min(static_cast<int>(books.size()), maxBooks));
 
   for (const RecentBook& book : books) {
     // Limit to maximum number of recent books
@@ -57,7 +58,7 @@ void HomeActivity::loadRecentBooks(int maxBooks) {
 }
 
 void HomeActivity::fillCoverGridFromLibrary() {
-  if (recentBooks.size() >= CoverGridHomeUi::MAX_BOOKS) return;
+  if (recentBooks.size() >= static_cast<size_t>(homeUi->maxBooks())) return;
   // Keep the index and record together off the task stack; reuse for every row.
   struct LibraryReader {
     library::LibraryIndexFile index;
@@ -80,7 +81,8 @@ void HomeActivity::fillCoverGridFromLibrary() {
       return;
     }
   }
-  for (uint16_t row = 0; row < index.bookCount() && recentBooks.size() < CoverGridHomeUi::MAX_BOOKS; ++row) {
+  for (uint16_t row = 0; row < index.bookCount() && recentBooks.size() < static_cast<size_t>(homeUi->maxBooks());
+       ++row) {
     RecentBook book;
     if (!index.readRecord(index.ordinalForRow(library::SortOrder::RecentDesc, row), record) ||
         !index.readPath(record, book.path))
@@ -169,8 +171,8 @@ bool HomeActivity::loadRecentCovers(int coverHeight) {
   for (RecentBook& book : recentBooks) {
     // The cover grid shares one slot size; generating at any other height
     // would rescale the dithered thumb at draw time and alias badly.
-    const int thumbHeight = coverGridUi ? coverGridUi->thumbHeightFor() : coverHeight;
-    if (coverGridUi) {
+    const int thumbHeight = homeUi ? homeUi->thumbHeightFor() : coverHeight;
+    if (homeUi) {
       const bool hadCover = !book.coverBmpPath.empty();
       loadGridCover(book, thumbHeight, showingLoading, popupRect);
       coverPathChanged |= hadCover != !book.coverBmpPath.empty();
@@ -237,17 +239,22 @@ void HomeActivity::onEnter() {
   hasOpdsServers = OPDS_STORE.hasServers();
 
   const auto& metrics = UITheme::getInstance().getMetrics();
-  if (UITheme::getInstance().hasCoverGridHome()) {
+  if (UITheme::getInstance().hasStatsHome()) {
     // Screen-lifetime interaction tables and component properties exceed the stack budget.
-    coverGridUi = makeUniqueNoThrow<CoverGridHomeUi>(renderer);
-    if (!coverGridUi) LOG_ERR("HOME", "OOM: cover grid UI; using standard home");
+    auto stats = makeUniqueNoThrow<StatsHomeUi>(renderer);
+    statsHome = stats.get();
+    homeUi = std::move(stats);
+    if (!homeUi) LOG_ERR("HOME", "OOM: stats home UI; using standard home");
+  } else if (UITheme::getInstance().hasCoverGridHome()) {
+    homeUi = makeUniqueNoThrow<CoverGridHomeUi>(renderer);
+    if (!homeUi) LOG_ERR("HOME", "OOM: cover grid UI; using standard home");
   }
-  loadRecentBooks(coverGridUi ? CoverGridHomeUi::MAX_BOOKS : metrics.homeRecentBooksCount);
+  loadRecentBooks(homeUi ? homeUi->maxBooks() : metrics.homeRecentBooksCount);
   hasContinueReading = !recentBooks.empty();
-  if (coverGridUi) {
+  if (homeUi) {
     fillCoverGridFromLibrary();
     resolveGridCoverPaths();
-    coverGridUi->begin(recentBooks, hasOpdsServers, hasContinueReading);
+    homeUi->begin(recentBooks, hasOpdsServers, hasContinueReading);
   }
 
   const auto base = static_cast<int>(recentBooks.size());
@@ -260,7 +267,8 @@ void HomeActivity::onEnter() {
 void HomeActivity::onExit() {
   Activity::onExit();
 
-  coverGridUi.reset();
+  statsHome = nullptr;
+  homeUi.reset();
 
   // Free the stored cover buffer if any
   freeCoverBuffer();
@@ -302,6 +310,28 @@ void HomeActivity::freeCoverBuffer() {
   coverBufferStored = false;
 }
 
+bool HomeActivity::statsSelectable(const int index) const {
+  // Off the grid page only the hero is left of the books.
+  return statsHome->showsGrid() || index == 0 || index >= static_cast<int>(recentBooks.size());
+}
+
+void HomeActivity::flipStatsPage(const int dir) {
+  statsHome->flipPage(dir);
+  if (!statsSelectable(selectorIndex)) selectorIndex = 0;
+  requestUpdate();
+}
+
+void HomeActivity::stepStatsSelection(const int dir) {
+  const int count = getMenuItemCount();
+  if (count <= 0) return;
+  int index = selectorIndex;
+  do {
+    index = (index + count + dir) % count;
+  } while (!statsSelectable(index) && index != selectorIndex);
+  selectorIndex = index;
+  requestUpdate();
+}
+
 void HomeActivity::loop() {
   const int menuCount = getMenuItemCount();
   const auto& metrics = UITheme::getInstance().getMetrics();
@@ -335,7 +365,7 @@ void HomeActivity::loop() {
 
   // Cover grid home splits navigation by button group (see below); the flat
   // next/previous cycle is for the classic list home only.
-  if (!coverGridUi) {
+  if (!homeUi) {
     buttonNavigator.onNext([this, menuCount] {
       selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
       requestUpdate();
@@ -348,6 +378,16 @@ void HomeActivity::loop() {
   }
 
   const auto swipe = mappedInput.wasSwipe();
+  // Horizontal swipes page through the stats; a left-edge swipe stays Back.
+  if (statsHome && (swipe == MappedInputManager::SwipeDir::Left ||
+                    (swipe == MappedInputManager::SwipeDir::Right && !mappedInput.wasBackGesture()))) {
+    flipStatsPage(swipe == MappedInputManager::SwipeDir::Left ? +1 : -1);
+    return;
+  }
+  if (statsHome && (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down)) {
+    stepStatsSelection(swipe == MappedInputManager::SwipeDir::Up ? +1 : -1);
+    return;
+  }
   if (swipe == MappedInputManager::SwipeDir::Up) {
     selectorIndex = ButtonNavigator::nextIndex(selectorIndex, menuCount);
     requestUpdate();
@@ -367,11 +407,15 @@ void HomeActivity::loop() {
     return;
   }
 
-  if (coverGridUi) {
-    const int touched = coverGridUi->selectedAction(mappedInput);
+  if (homeUi) {
+    const int touched = homeUi->selectedAction(mappedInput);
     if (touched >= 0 && touched < menuCount) {
       selectorIndex = touched;
       activateSelection();
+      return;
+    }
+    if (statsHome && statsHome->takePageTap()) {
+      flipStatsPage(+1);
       return;
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
@@ -393,6 +437,15 @@ void HomeActivity::loop() {
       selectorIndex = base + idx;
       requestUpdate();
     };
+    if (statsHome) {
+      // The side buttons page through grid and statistics; front Left/Right
+      // walk everything selectable on the page (books, then tabs).
+      ButtonNavigator::onPress({MappedInputManager::Button::Up}, [this] { flipStatsPage(-1); });
+      ButtonNavigator::onPress({MappedInputManager::Button::Down}, [this] { flipStatsPage(+1); });
+      buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Left}, [this] { stepStatsSelection(-1); });
+      buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Right}, [this] { stepStatsSelection(+1); });
+      return;
+    }
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Up},
                                          [&cycleBand, bookCount] { cycleBand(0, bookCount, -1); });
     buttonNavigator.onPressAndContinuous({MappedInputManager::Button::Down},
@@ -461,9 +514,9 @@ void HomeActivity::render(RenderLock&&) {
   const auto pageHeight = renderer.getScreenHeight();
 
   renderer.clearScreen();
-  if (coverGridUi) {
-    coverGridUi->setSelection(selectorIndex);
-    UITheme::getInstance().drawCoverGridHome(*coverGridUi);
+  if (homeUi) {
+    homeUi->setSelection(selectorIndex);
+    UITheme::getInstance().drawHomeShell(*homeUi);
     // Front Left/Right walk the tabs, so their hints read Left/Right; the
     // side page buttons (unhinted) walk the covers.
     const auto labels = mappedInput.mapLabels(hasContinueReading ? tr(STR_RESUME) : "", tr(STR_SELECT),
@@ -474,13 +527,13 @@ void HomeActivity::render(RenderLock&&) {
     // Slot heights are recorded during the draw above, which already pointed
     // the paths at those sizes and painted every cached thumb. A change (first
     // layout pass, orientation switch) means missing thumbs must be generated.
-    if (coverGridUi->takeThumbHeightChanged()) recentsLoaded = false;
+    if (homeUi->takeThumbHeightChanged()) recentsLoaded = false;
     firstRenderDone = true;
     // The screen is already up, so the missing-thumb check runs right away
     // instead of costing another refresh. Redraw only when it changed
     // something: once every thumb exists, entering home is a single refresh.
-    if (!recentsLoaded && !recentsLoading && loadRecentCovers(CoverGridHomeUi::THUMB_HEIGHT)) {
-      coverGridUi->refreshCoverPaths();
+    if (!recentsLoaded && !recentsLoading && loadRecentCovers(HomeShellUi::THUMB_HEIGHT)) {
+      homeUi->refreshCoverPaths();
       requestUpdate();
     }
     return;

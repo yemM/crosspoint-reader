@@ -12,7 +12,7 @@
 
 #include "MappedInputManager.h"
 #include "RecentBooksStore.h"
-#include "components/CoverGridHomeUi.h"
+#include "components/HomeShellUi.h"
 #include "components/themes/BaseTheme.h"
 #include "components/themes/lyra/Lyra3CoversTheme.h"
 #include "components/themes/lyra/LyraTheme.h"
@@ -32,12 +32,19 @@ void UITheme::reload() {
 
 bool UITheme::supportsCoverGrid() { return HalMemory::getPsramHeap().totalBytes > 0; }
 
-bool UITheme::hasCoverGridHome() { return SETTINGS.uiTheme == CrossPointSettings::COVER_GRID && supportsCoverGrid(); }
+bool UITheme::hasCoverGridHome() {
+  return (SETTINGS.uiTheme == CrossPointSettings::COVER_GRID || SETTINGS.uiTheme == CrossPointSettings::STATS) &&
+         supportsCoverGrid();
+}
 
-void UITheme::drawCoverGridHome(CoverGridHomeUi& home) { home.renderUi(); }
+bool UITheme::hasStatsHome() { return SETTINGS.uiTheme == CrossPointSettings::STATS && supportsCoverGrid(); }
+
+void UITheme::drawHomeShell(HomeShellUi& home) { home.renderUi(); }
 
 void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
-  if (type == CrossPointSettings::COVER_GRID && !supportsCoverGrid()) type = CrossPointSettings::LYRA;
+  if ((type == CrossPointSettings::COVER_GRID || type == CrossPointSettings::STATS) && !supportsCoverGrid()) {
+    type = CrossPointSettings::LYRA;
+  }
 
   switch (type) {
     case CrossPointSettings::UI_THEME::CLASSIC:
@@ -46,6 +53,7 @@ void UITheme::setTheme(CrossPointSettings::UI_THEME type) {
       currentMetrics = &BaseMetrics::values;
       break;
     case CrossPointSettings::UI_THEME::COVER_GRID:
+    case CrossPointSettings::UI_THEME::STATS:
     case CrossPointSettings::UI_THEME::LYRA: {
       // The cover home owns its screen-lifetime UI state; other screens retain Lyra styling.
       auto theme = makeUniqueNoThrow<LyraTheme>();
