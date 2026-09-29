@@ -35,6 +35,11 @@ class ReaderActivity : public Activity {
   virtual void applyInitialOrientation();
   virtual void onEndOfBookRendered() {}
 
+  // pageTurn()/skipPages() that also feed the reading stats. Forward turns count
+  // as read pages, except the one that lands on the end-of-book screen.
+  bool turnPageRecorded(bool isForward);
+  bool skipPagesRecorded(int amount);
+
   bool handleBackNavigation();
   /** True while the end-of-book suggestion menu is on screen and owning input. */
   bool endOfBookMenuActive() const;
@@ -56,4 +61,8 @@ class ReaderActivity : public Activity {
 
   bool isReaderActivity() const final { return true; }
   bool handleForcedRefresh() final;
+
+ private:
+  // Raised by render() at the end-of-book screen; the loop task records it.
+  std::atomic<bool> finishedPending{false};
 };

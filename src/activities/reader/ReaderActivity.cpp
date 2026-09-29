@@ -11,6 +11,7 @@
 #include "CrossPointState.h"
 #include "EpubReaderActivity.h"
 #include "ReaderUtils.h"
+#include "ReadingStatsStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "TxtReaderActivity.h"
@@ -71,11 +72,16 @@ void ReaderActivity::onEnter() {
   APP_STATE.openEpubPath = bookPath;
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(bookPath, getBookTitle(), getBookAuthor(), getBookThumbBmpPath());
+  READING_STATS.beginSession(bookPath.c_str());
   requestUpdate();
 }
 
 void ReaderActivity::onExit() {
   Activity::onExit();
+
+  // Also runs on the way to deep sleep, before the SD card is released.
+  if (finishedPending.exchange(false)) READING_STATS.noteFinished();
+  READING_STATS.endSession();
 
   // Keep rebuildable font buffers from pinning the heap between reading sessions.
   if (auto* fontCache = renderer.getFontCacheManager()) {
@@ -170,15 +176,15 @@ void ReaderActivity::loop() {
 
   if (prevTriggered) {
     if (skip) {
-      skipPages(-10);
+      skipPagesRecorded(-10);
     } else {
-      pageTurn(false);
+      turnPageRecorded(false);
     }
   } else {
     if (skip) {
-      skipPages(10);
+      skipPagesRecorded(10);
     } else {
-      pageTurn(true);
+      turnPageRecorded(true);
     }
   }
   requestUpdate();
@@ -199,11 +205,24 @@ void ReaderActivity::render(RenderLock&&) {
       endOfBookOptions->render(renderer, mappedInput);
     }
     renderer.displayBuffer();
+    finishedPending.store(true);
     onEndOfBookRendered();
     return;
   }
 
   renderBook();
+}
+
+bool ReaderActivity::turnPageRecorded(const bool isForward) {
+  const bool moved = pageTurn(isForward);
+  if (moved) READING_STATS.noteActivity(isForward && !isAtEndOfBook());
+  return moved;
+}
+
+bool ReaderActivity::skipPagesRecorded(const int amount) {
+  const bool moved = skipPages(amount);
+  if (moved) READING_STATS.noteActivity(false);
+  return moved;
 }
 
 bool ReaderActivity::handleForcedRefresh() {
