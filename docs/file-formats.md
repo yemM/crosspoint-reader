@@ -506,3 +506,28 @@ make a real book disappear.
 
 `selfSize` is the expected file size. Comparing it against the real one is a free
 truncation guard: a build cut short by a power failure cannot pass.
+
+## RST1 — reading statistics (`.crosspoint/reading_stats.bin`)
+
+Written only on boards with PSRAM (the ones offering the Stats home). One fixed
+484-byte little-endian record, the raw `reading_stats::Data` struct from
+`src/util/ReadingStats.h`, replaced atomically through `reading_stats.bin.tmp`.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | magic `RST1` (`0x31545352`) |
+| 4 | 2 | version (1) |
+| 6 | 2 | record size (484) |
+| 8 | 4+4+2 | lifetime seconds, pages, finished books |
+| 18 | 2 | year of the year block (0 until the clock gave a date) |
+| 20 | 4+4+2 | this year's seconds, pages, finished books |
+| 30 | 2+2 | current and best streak (days) |
+| 34 | 1+1 | finished-book ring count and next slot |
+| 36 | 4 | last streak day (days since 1970-01-01) |
+| 40 | 16 | this year's seconds per time of day (morning, afternoon, evening, night) |
+| 56 | 168 | 14 day slots `{int32 day, uint32 seconds, uint16 pages, uint16 reserved}`, slot = day % 14 |
+| 224 | 256 | 64 FNV-1a path hashes of books finished this year |
+| 480 | 4 | FNV-1a checksum of bytes 0..479 |
+
+A record with a bad magic, size or checksum is ignored (reading stats start
+over); one with a newer version is left untouched and nothing is recorded.
