@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <iterator>
+#include <numeric>
 
 #include "CrossPointSettings.h"
 #include "ReadingStatsStore.h"
@@ -92,6 +93,10 @@ int16_t ReadingStatsPanel::drawCards(UiAppHost::UiScreen& screen, const fui::Rec
     fui::metricCard(screen.frame(), cell, card);
   }
   return height;
+}
+
+uint32_t ReadingStatsPanel::weekSeconds() const {
+  return std::accumulate(std::begin(daySeconds), std::end(daySeconds), uint32_t{0});
 }
 
 int16_t ReadingStatsPanel::drawSectionTitle(UiAppHost::UiScreen& screen, const fui::Rect rect, const char* left,
@@ -199,13 +204,8 @@ void ReadingStatsPanel::drawWeekChart(UiAppHost::UiScreen& screen, const fui::Re
   auto& target = screen.target();
   const int16_t smallHeight = target.lineHeight(theme.smallText.font);
 
-  uint32_t weekSeconds = 0;
-  uint32_t maxSeconds = 0;
-  for (const uint32_t seconds : daySeconds) {
-    weekSeconds += seconds;
-    maxSeconds = std::max(maxSeconds, seconds);
-  }
-  const char* unit = formatDuration(weekSeconds, chartLabel, sizeof(chartLabel));
+  const uint32_t maxSeconds = *std::max_element(std::begin(daySeconds), std::end(daySeconds));
+  const char* unit = formatDuration(weekSeconds(), chartLabel, sizeof(chartLabel));
   if (unit) {
     snprintf(line, sizeof(line), "%s %s", chartLabel, unit);
   } else {
@@ -309,10 +309,9 @@ void ReadingStatsPanel::drawHabits(UiAppHost::UiScreen& screen, const fui::Rect 
   if (!columns) second.y = static_cast<int16_t>(rect.y + bucketsHeight + gap);
 
   int16_t y = second.y;
-  uint32_t weekSeconds = 0;
-  for (const uint32_t seconds : daySeconds) weekSeconds += seconds;
-  const char* weekUnit = formatDuration(weekSeconds, values[0], sizeof(values[0]));
-  const char* averageUnit = formatDuration(weekSeconds / rs::CHART_DAYS, values[1], sizeof(values[1]));
+  const uint32_t weekTotal = weekSeconds();
+  const char* weekUnit = formatDuration(weekTotal, values[0], sizeof(values[0]));
+  const char* averageUnit = formatDuration(weekTotal / rs::CHART_DAYS, values[1], sizeof(values[1]));
   const Card week[] = {{tr(STR_STATS_THIS_WEEK), values[0], weekUnit},
                        {tr(STR_STATS_DAILY_AVERAGE), values[1], averageUnit}};
   y = static_cast<int16_t>(y + drawCards(screen, fui::Rect{second.x, y, second.width, 0}, week, 2) + gap);

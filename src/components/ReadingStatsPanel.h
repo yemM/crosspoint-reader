@@ -39,8 +39,11 @@ class ReadingStatsPanel {
   int16_t drawGoal(UiAppHost::UiScreen& screen, freeink::ui::Rect rect);
   void drawWeekChart(UiAppHost::UiScreen& screen, freeink::ui::Rect rect);
   int16_t drawBuckets(UiAppHost::UiScreen& screen, freeink::ui::Rect rect);
-  int16_t drawSectionTitle(UiAppHost::UiScreen& screen, freeink::ui::Rect rect, const char* left, const char* right);
+  static int16_t drawSectionTitle(UiAppHost::UiScreen& screen, freeink::ui::Rect rect, const char* left,
+                                  const char* right);
   int16_t cardHeight(UiAppHost::UiScreen& screen) const;
+  // Reading time over the chart's seven days.
+  uint32_t weekSeconds() const;
   // Formats a duration for a card: value into buf, unit (or null) returned.
   static const char* formatDuration(uint32_t seconds, char* buf, size_t len);
 
