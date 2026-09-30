@@ -123,7 +123,7 @@ void LibraryCoverCache::load(const int slot) {
   if (entry.state != SlotState::Cover) drawPlaceholder(entry.path, canvas);
 }
 
-bool LibraryCoverCache::decodeThumb(const std::string& thumbPath, uint8_t* canvas) const {
+bool LibraryCoverCache::decodeThumb(const std::string& thumbPath, uint8_t* canvas) {
   cover_canvas::clear(canvas);
   HalFile file;
   if (!Storage.openFileForRead("LIB", thumbPath, file)) return false;
@@ -159,7 +159,7 @@ bool LibraryCoverCache::decodeThumb(const std::string& thumbPath, uint8_t* canva
   return true;
 }
 
-void LibraryCoverCache::drawPlaceholder(const std::string& path, uint8_t* canvas) const {
+void LibraryCoverCache::drawPlaceholder(const std::string& path, uint8_t* canvas) {
   cover_canvas::clear(canvas);
   cover_canvas::frame(canvas);
   const fui::BitmapRef icon = listIconFor(UITheme::getFileIcon(path), 32);

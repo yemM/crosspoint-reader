@@ -70,8 +70,8 @@ class LibraryCoverCache {
   // Decodes the book's thumb into the slot's canvas, or draws the placeholder
   // when there is none (yet).
   void load(int slot);
-  bool decodeThumb(const std::string& thumbPath, uint8_t* canvas) const;
-  void drawPlaceholder(const std::string& path, uint8_t* canvas) const;
+  static bool decodeThumb(const std::string& thumbPath, uint8_t* canvas);
+  static void drawPlaceholder(const std::string& path, uint8_t* canvas);
 
   std::unique_ptr<uint8_t[]> pixels;
   CoverSlotTable<SLOT_COUNT> table;

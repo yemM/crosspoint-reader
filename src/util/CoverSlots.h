@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -21,10 +22,9 @@ class CoverSlotTable {
   void beginBuild() { ++stamp; }
 
   int find(const uint64_t key) const {
-    for (int i = 0; i < N; ++i) {
-      if (slots[i].occupied && slots[i].key == key) return i;
-    }
-    return -1;
+    const auto it =
+        std::find_if(slots.begin(), slots.end(), [key](const Entry& e) { return e.occupied && e.key == key; });
+    return it == slots.end() ? -1 : static_cast<int>(it - slots.begin());
   }
 
   // Assigns a slot to a key that has none and touches it: an empty slot first,
@@ -68,10 +68,7 @@ class CoverKeyRing {
   }
 
   bool contains(const uint64_t key) const {
-    for (int i = 0; i < count; ++i) {
-      if (keys[i] == key) return true;
-    }
-    return false;
+    return std::any_of(keys.begin(), keys.begin() + count, [key](const uint64_t k) { return k == key; });
   }
 
   void add(const uint64_t key) {
