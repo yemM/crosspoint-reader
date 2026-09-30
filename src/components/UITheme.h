@@ -8,7 +8,7 @@
 #include "CrossPointSettings.h"
 #include "components/themes/BaseTheme.h"
 
-class CoverGridHomeUi;
+class HomeShellUi;
 
 class UITheme {
   // Static instance
@@ -32,8 +32,10 @@ class UITheme {
                                       EpdFontFamily::Style style = EpdFontFamily::REGULAR,
                                       TextVerticalAlignment verticalAlignment = TextVerticalAlignment::CENTER);
   static bool supportsCoverGrid();
+  // Cover Grid or Stats: the homes built on HomeShellUi.
   static bool hasCoverGridHome();
-  static void drawCoverGridHome(CoverGridHomeUi& home);
+  static bool hasStatsHome();
+  static void drawHomeShell(HomeShellUi& home);
   void reload();
   void setTheme(CrossPointSettings::UI_THEME type);
   static std::string getCoverThumbPath(std::string coverBmpPath, int coverHeight);

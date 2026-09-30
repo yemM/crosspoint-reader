@@ -520,7 +520,7 @@ void EpubReaderActivity::loop() {
     }
 
     if ((millis() - lastPageTurnTime) >= pageTurnDuration) {
-      pageTurn(true);
+      turnPageRecorded(true);
       requestUpdate();
       return;
     }
@@ -648,7 +648,7 @@ void EpubReaderActivity::loop() {
     }
     const bool forward = pendingManualTurn > 0;
     pendingManualTurn = 0;
-    pageTurn(forward);
+    turnPageRecorded(forward);
     requestUpdate();
     return;
   }
@@ -672,7 +672,7 @@ void EpubReaderActivity::loop() {
   const unsigned long heldMs = (touch.prev || touch.next) ? touch.heldMs : mappedInput.getHeldTime();
   const bool longPress = !fromTilt && heldMs >= ReaderUtils::SKIP_HOLD_MS;
   if (longPress && SETTINGS.longPressButtonBehavior == SETTINGS.CHAPTER_SKIP) {
-    skipPages(nextTriggered ? 1 : -1);
+    skipPagesRecorded(nextTriggered ? 1 : -1);
     requestUpdate();
     return;
   }
@@ -697,9 +697,9 @@ void EpubReaderActivity::loop() {
   }
 
   if (prevTriggered) {
-    pageTurn(false);
+    turnPageRecorded(false);
   } else {
-    pageTurn(true);
+    turnPageRecorded(true);
   }
   requestUpdate();
 }

@@ -254,6 +254,18 @@ The Settings screen allows you to configure the device's behavior. There are a f
   - "Lyra" - The new theme for Crosspoint featuring rounded elements and menu icons
   - "Lyra Extended" - Lyra, but displays 3 books instead of 1 on the **[Home Screen](#31-home-screen)**
   - "RoundedRaff" - A rounded theme with additional visual styling
+  - "Cover Grid" - The book you are reading and your six most recent books as covers (devices with PSRAM, e.g. X4 Pro)
+  - "Stats" - "Cover Grid" with your reading statistics one swipe away (devices with PSRAM, e.g. X4 Pro). The first
+    page is the cover grid; the second shows this year's finished books, reading time and pages, your yearly goal,
+    minutes read over the last 7 days and your reading streak; the third shows when you read (morning, afternoon,
+    evening, night), this week and all-time totals. Swipe left/right, tap the statistics or press the side buttons to
+    switch pages (on this home a swipe from the left edge also goes back a page rather than reopening your book; tap
+    the book card to resume); front Left/Right walk the covers and tabs. Reading is recorded from the moment this firmware is
+    installed; a pause of more than 5 minutes between two page turns is not counted. The yearly and daily figures
+    need the clock to be set (synced over WiFi); until then only all-time totals are shown.
+
+- **Yearly Reading Goal**: Number of books to finish this year, shown as a progress bar on the "Stats" home (devices
+  with PSRAM only). "Off" hides it.
 
 - **Sunlight Fading Fix**: Configure whether to enable a software-fix for the issue where white X4 models may fade when used in direct sunlight:
   

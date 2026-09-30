@@ -5,13 +5,17 @@
 #include "./FileBrowserActivity.h"
 #include "RecentBooksStore.h"
 #include "activities/Activity.h"
-#include "components/CoverGridHomeUi.h"
+#include "components/HomeShellUi.h"
+#include "components/StatsHomeUi.h"
 #include "util/ButtonNavigator.h"
 
 struct Rect;
 
 class HomeActivity final : public Activity {
-  std::unique_ptr<CoverGridHomeUi> coverGridUi;
+  // Cover Grid or Stats home; null for the list-style themes.
+  std::unique_ptr<HomeShellUi> homeUi;
+  // homeUi when it is the Stats home (not owned).
+  StatsHomeUi* statsHome = nullptr;
   ButtonNavigator buttonNavigator;
   int selectorIndex = 0;
   bool recentsLoading = false;
@@ -75,6 +79,10 @@ class HomeActivity final : public Activity {
   void fillCoverGridFromLibrary();
   void resolveGridCoverPaths();
   void loadGridCover(RecentBook& book, int height, bool& showingLoading, Rect& popupRect);
+  // Stats home navigation: its covers are only selectable on the grid page.
+  bool statsSelectable(int index) const;
+  void flipStatsPage(int dir);
+  void stepStatsSelection(int dir);
 
  public:
   explicit HomeActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,

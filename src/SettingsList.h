@@ -188,11 +188,19 @@ inline std::vector<StrId> buildLongPressMenuValues() {
 }
 
 inline std::vector<StrId> homeThemeValues() {
-  static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                                     StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_COVER_GRID};
-  const size_t count = UITheme::supportsCoverGrid() ? std::size(VALUES) : std::size(VALUES) - 1;
+  static constexpr StrId VALUES[] = {StrId::STR_THEME_CLASSIC,       StrId::STR_THEME_LYRA,
+                                     StrId::STR_THEME_LYRA_EXTENDED, StrId::STR_THEME_ROUNDEDRAFF,
+                                     StrId::STR_THEME_COVER_GRID,    StrId::STR_THEME_STATS};
+  // The PSRAM-only homes (Cover Grid, Stats) stay last so they can be cut off.
+  constexpr size_t PSRAM_THEMES = 2;
+  const size_t count = UITheme::supportsCoverGrid() ? std::size(VALUES) : std::size(VALUES) - PSRAM_THEMES;
   return {VALUES, VALUES + count};
 }
+
+inline constexpr StrId READING_GOAL_LABELS[] = {
+    StrId::STR_STATE_OFF, StrId::STR_GOAL_6,  StrId::STR_GOAL_12, StrId::STR_GOAL_18, StrId::STR_GOAL_24,
+    StrId::STR_GOAL_30,   StrId::STR_GOAL_40, StrId::STR_GOAL_52, StrId::STR_GOAL_75, StrId::STR_GOAL_100};
+static_assert(std::size(READING_GOAL_LABELS) == std::size(CrossPointSettings::READING_GOAL_BOOKS));
 
 // Shared settings list used by both the device settings UI and the web settings API.
 // Each entry has a key (for JSON API) and category (for grouping).
@@ -245,6 +253,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
                           "refreshFrequency", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme, homeThemeValues(), "uiTheme",
                           StrId::STR_CAT_DISPLAY),
+        SettingInfo::StaticEnum(StrId::STR_READING_GOAL, &CrossPointSettings::readingGoal, READING_GOAL_LABELS,
+                                "readingGoal", StrId::STR_CAT_DISPLAY),
         SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                             StrId::STR_CAT_DISPLAY),
 #if FREEINK_CAP_FRONTLIGHT
@@ -499,6 +509,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     if (!BoardConfig::isX4Pro()) eraseEntry(StrId::STR_DBL_CLICK_PWR_LIGHT);
     // Tilt page turn needs the QMI8658 IMU (X3).
     if (!halTiltSensor.isAvailable()) eraseEntry(StrId::STR_TILT_PAGE_TURN);
+    // The reading goal is shown on the Stats home, a PSRAM-only theme.
+    if (!UITheme::supportsCoverGrid()) eraseEntry(StrId::STR_READING_GOAL);
     return v;
   }();
 
