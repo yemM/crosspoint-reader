@@ -378,9 +378,11 @@ void HomeActivity::loop() {
   }
 
   const auto swipe = mappedInput.wasSwipe();
-  // Horizontal swipes page through the stats; a left-edge swipe stays Back.
-  if (statsHome && (swipe == MappedInputManager::SwipeDir::Left ||
-                    (swipe == MappedInputManager::SwipeDir::Right && !mappedInput.wasBackGesture()))) {
+  // Horizontal swipes page through the stats. The left-edge Back gesture pages
+  // back too instead of reopening the last book: a page swipe starting near the
+  // edge would otherwise leave the home. The hero card still resumes reading.
+  if (statsHome && (swipe == MappedInputManager::SwipeDir::Left || swipe == MappedInputManager::SwipeDir::Right ||
+                    mappedInput.wasBackGesture())) {
     flipStatsPage(swipe == MappedInputManager::SwipeDir::Left ? +1 : -1);
     return;
   }

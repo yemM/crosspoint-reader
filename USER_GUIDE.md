@@ -259,7 +259,8 @@ The Settings screen allows you to configure the device's behavior. There are a f
     page is the cover grid; the second shows this year's finished books, reading time and pages, your yearly goal,
     minutes read over the last 7 days and your reading streak; the third shows when you read (morning, afternoon,
     evening, night), this week and all-time totals. Swipe left/right, tap the statistics or press the side buttons to
-    switch pages; front Left/Right walk the covers and tabs. Reading is recorded from the moment this firmware is
+    switch pages (on this home a swipe from the left edge also goes back a page rather than reopening your book; tap
+    the book card to resume); front Left/Right walk the covers and tabs. Reading is recorded from the moment this firmware is
     installed; a pause of more than 5 minutes between two page turns is not counted. The yearly and daily figures
     need the clock to be set (synced over WiFi); until then only all-time totals are shown.
 
