@@ -83,14 +83,15 @@ class LibraryListActivity final : public UiTabListActivity {
   // Generates every missing cover thumb after a manual refresh (covers on).
   void prepareAllCovers();
   void resetAfterRebuild();
-  // Recent-row long-press menu: open / remove from recents / delete / rebuild.
-  void showRecentBookOptions(int entry);
+  // Book-row long-press menu, on every tab: open, description (EPUB),
+  // remove from recents (store rows), show groups (Title/Author, no search),
+  // delete, rebuild.
+  void showBookOptions(int entry);
+  // Path and title of a book row, from RecentBooksStore or the index.
+  bool resolveBookRow(int entry, std::string& path, std::string& title);
+  // Reads the EPUB's <dc:description> and shows it in a paged viewer.
+  void showBookDescription(const std::string& path, const std::string& title);
   void promptRemoveRecentBook(const std::string& path, const std::string& title);
-  // Long-press delete owns the gesture where grouping does not apply: the
-  // Recent sort, degraded lists, and any active search result.
-  bool deleteEligible() const;
-  // Resolves the row's path and title, then confirms via promptDeleteBookByPath.
-  void promptDeleteBook(int entry);
   void promptDeleteBookByPath(const std::string& path, const std::string& title);
   bool collapseGroups(int bookEntry);
   void expandGroup(int groupEntry);
