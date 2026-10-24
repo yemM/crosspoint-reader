@@ -17,7 +17,7 @@ Check [our Devices page](https://crosspointreader.com/devices) for the full list
 
 ## Changes in this fork
 
-This fork follows the `develop` branch of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) and adds the changes below. Last synced with upstream on 2026-10-12.
+This fork follows the `develop` branch of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) and adds the changes below. Last synced with upstream on 2026-10-24.
 
 ### New features
 
