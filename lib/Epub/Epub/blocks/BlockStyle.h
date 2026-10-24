@@ -17,6 +17,8 @@ struct BlockStyle {
 
   CssTextAlign alignment = CssTextAlign::Justify;
 
+  // Extra pixels between glyphs during layout and drawing.
+  int8_t characterSpacing = 0;
   // Spacing (in pixels)
   int16_t marginTop = 0;
   int16_t marginBottom = 0;
@@ -32,6 +34,17 @@ struct BlockStyle {
   bool isRtl = false;              // true if resolved direction is RTL
   bool directionDefined = false;   // true if direction was explicitly set in CSS/HTML
 
+  // Computed CSS font size relative to the reader's body size. Layout-time only.
+  float fontScale = 1.0f;
+  bool fontScaleDefined = false;
+  // Renderer font for this block's lines; 0 means the section's reader font.
+  int32_t fontId = 0;
+  // Forced page breaks from CSS. Layout-time only; never inherited by children.
+  bool pageBreakBefore = false;
+  bool pageBreakAfter = false;
+  // Headings: keep the block's last lines on the page with whatever follows. Layout-time only.
+  bool keepWithNext = false;
+
   // Combined insets (margin + padding)
   [[nodiscard]] int16_t leftInset() const { return marginLeft + paddingLeft; }
   [[nodiscard]] int16_t rightInset() const { return marginRight + paddingRight; }
@@ -44,6 +57,14 @@ struct BlockStyle {
     BlockStyle result = *this;
     result.marginBottom = 0;
     result.paddingBottom = 0;
+    return result;
+  }
+
+  // Return a copy with top margins/padding zeroed out.
+  [[nodiscard]] BlockStyle withoutTop() const {
+    BlockStyle result = *this;
+    result.marginTop = 0;
+    result.paddingTop = 0;
     return result;
   }
 
@@ -84,12 +105,18 @@ struct BlockStyle {
       result.marginBottom = std::max(child.marginBottom, marginBottom);
       result.paddingTop = static_cast<int16_t>(child.paddingTop + paddingTop);
       result.paddingBottom = static_cast<int16_t>(child.paddingBottom + paddingBottom);
+      // A container's break lands on its first child when they share the empty block.
+      result.pageBreakBefore = child.pageBreakBefore || pageBreakBefore;
     }
 
     // Direction is not axis-specific. Inherit from parent when child doesn't define it.
     if (!child.directionDefined && directionDefined) {
       result.isRtl = isRtl;
       result.directionDefined = true;
+    }
+    if (!child.fontScaleDefined && fontScaleDefined) {
+      result.fontScale = fontScale;
+      result.fontScaleDefined = true;
     }
 
     return result;
@@ -127,6 +154,8 @@ struct BlockStyle {
     } else {
       blockStyle.alignment = paragraphAlignment;
     }
+    blockStyle.pageBreakBefore = cssStyle.hasPageBreakBefore() && cssStyle.pageBreakBefore;
+    blockStyle.pageBreakAfter = cssStyle.hasPageBreakAfter() && cssStyle.pageBreakAfter;
     // RTL direction from CSS/HTML
     if (cssStyle.hasDirection()) {
       blockStyle.isRtl = (cssStyle.direction == CssTextDirection::Rtl);

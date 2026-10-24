@@ -1,10 +1,13 @@
 #pragma once
 
+#include <BufferedFile.h>
 #include <HalStorage.h>
 
 #include <algorithm>
 #include <deque>
+#include <memory>
 #include <string>
+#include <vector>
 
 class BookMetadataCache {
  public:
@@ -54,15 +57,28 @@ class BookMetadataCache {
   // Temp file handles during build
   HalFile spineFile;
   HalFile tocFile;
+  // Buffers the per-entry tmp-file writes during the OPF/TOC passes: those
+  // writes interleave with zip-inflate SD reads, and unbuffered they thrash
+  // SdFat's shared sector cache (one 512B transaction per 4-byte pod). One
+  // wrapper serves whichever pass is active (spine, then toc).
+  std::unique_ptr<serialization::BufferedFileWriter> passOut;
 
-  // Index for fast href→spineIndex lookup (used only for large EPUBs)
+  // Cumulative spine sizes stay in book.bin; RAM holds every SIZE_WINDOW-th one and one window.
+  static constexpr int SIZE_WINDOW = 32;
+  std::vector<uint32_t> windowStarts;  // total before item w * SIZE_WINDOW
+  uint32_t bookSize = 0;
+  mutable int windowFirst = -1;
+  mutable uint32_t window[SIZE_WINDOW] = {};
+  bool fillWindow(int first) const;  // caller holds sizeWindowLock
+
+  // Index for fast href→spineIndex lookup. Exists only during a large EPUB's
+  // TOC pass; a bare deque member would hold its first node for every open book.
   struct SpineHrefIndexEntry {
     uint64_t hrefHash;  // FNV-1a 64-bit hash
     uint16_t hrefLen;   // length for collision reduction
     int16_t spineIndex;
   };
-  std::deque<SpineHrefIndexEntry> spineHrefIndex;
-  bool useSpineHrefIndex = false;
+  std::unique_ptr<std::deque<SpineHrefIndexEntry>> spineHrefIndex;
 
   static constexpr uint16_t LARGE_SPINE_THRESHOLD = 400;
 
@@ -106,6 +122,11 @@ class BookMetadataCache {
   bool load();
   SpineEntry getSpineEntry(int index);
   TocEntry getTocEntry(int index);
+  // Cumulative byte size up to and including the given spine item (0 if out of range
+  // or not loaded).
+  uint32_t getCumulativeSize(int index) const;
+  // First spine index whose cumulative size reaches `size` (-1 past the end or not loaded). Reads at most one window.
+  int getSpineIndexForSize(uint32_t size) const;
   int getSpineCount() const { return spineCount; }
   int getTocCount() const { return tocCount; }
   bool isLoaded() const { return loaded; }

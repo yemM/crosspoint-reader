@@ -14,6 +14,12 @@ void ClearCacheActivity::onEnter() {
   Activity::onEnter();
 
   state = WARNING;
+  const char* options[] = {tr(STR_CANCEL), tr(STR_CLEAR_BUTTON)};
+  confirmPopup.showMessage(tr(STR_CLEAR_READING_CACHE), tr(STR_CLEAR_CACHE_WARNING_2), options, 2, 0, [this](int idx) {
+    if (idx == 1) {
+      beginClear();
+    }
+  });
   requestUpdate();
 }
 
@@ -29,15 +35,7 @@ void ClearCacheActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.headerHeight}, tr(STR_CLEAR_READING_CACHE));
 
   if (state == WARNING) {
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 60, tr(STR_CLEAR_CACHE_WARNING_1), true);
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 - 30, tr(STR_CLEAR_CACHE_WARNING_2), true,
-                              EpdFontFamily::BOLD);
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 10, tr(STR_CLEAR_CACHE_WARNING_3), true);
-    renderer.drawCenteredText(UI_10_FONT_ID, pageHeight / 2 + 30, tr(STR_CLEAR_CACHE_WARNING_4), true);
-
-    const auto labels = mappedInput.mapLabels(tr(STR_CANCEL), tr(STR_CLEAR_BUTTON), "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    renderer.displayBuffer();
+    confirmPopup.processRender(renderer, mappedInput);
     return;
   }
 
@@ -71,6 +69,16 @@ void ClearCacheActivity::render(RenderLock&&) {
     renderer.displayBuffer();
     return;
   }
+}
+
+void ClearCacheActivity::beginClear() {
+  LOG_DBG("CLEAR_CACHE", "User confirmed, starting cache clear");
+  {
+    RenderLock lock(*this);
+    state = CLEARING;
+  }
+  requestUpdateAndWait();
+  clearCache();
 }
 
 void ClearCacheActivity::clearCache() {
@@ -122,26 +130,19 @@ void ClearCacheActivity::clearCache() {
 
 void ClearCacheActivity::loop() {
   if (state == WARNING) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) {
-      LOG_DBG("CLEAR_CACHE", "User confirmed, starting cache clear");
-      {
-        RenderLock lock(*this);
-        state = CLEARING;
-      }
-      requestUpdateAndWait();
-
-      clearCache();
-    }
-
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
-      LOG_DBG("CLEAR_CACHE", "User cancelled");
+    confirmPopup.handleInput(mappedInput, [this] { requestUpdate(); });
+    // The selection callback can change state through beginClear().
+    // cppcheck-suppress knownConditionTrueFalse
+    if (!confirmPopup.isActive() && state == WARNING) {
       goBack();
     }
     return;
   }
 
   if (state == SUCCESS || state == FAILED) {
-    if (mappedInput.wasPressed(MappedInputManager::Button::Back)) {
+    int x = 0;
+    int y = 0;
+    if (mappedInput.wasPressed(MappedInputManager::Button::Back) || mappedInput.wasScreenTapped(x, y)) {
       goBack();
     }
     return;

@@ -2,14 +2,12 @@
 
 #include <InflateReader.h>
 
-#include <vector>
-
 #include "EpdFontData.h"
 
 class FontDecompressor {
  public:
   static constexpr uint16_t MAX_PAGE_GLYPHS = 512;
-  static constexpr uint8_t MAX_PAGE_SLOTS = 4;  // One per font style (R/B/I/BI)
+  static constexpr uint8_t MAX_PAGE_SLOTS = 8;  // One per font/style pair: body R/B/I/BI plus heading sizes
 
   FontDecompressor() = default;
   ~FontDecompressor();
@@ -50,7 +48,7 @@ class FontDecompressor {
   InflateReader inflateReader;
 
   // Page buffer slots: each style gets its own flat glyph buffer with sorted lookup.
-  // Up to MAX_PAGE_SLOTS (4) styles can be prewarmed simultaneously.
+  // Up to MAX_PAGE_SLOTS font/style pairs can be prewarmed simultaneously.
   struct PageGlyphEntry {
     uint32_t glyphIndex;
     uint32_t bufferOffset;
@@ -67,13 +65,22 @@ class FontDecompressor {
 
   // Hot group: last decompressed group (byte-aligned) for non-prewarmed fallback path.
   // Kept in byte-aligned format; individual glyphs are compacted on demand into hotGlyphBuf.
+  // Nothrow high-water malloc buffers, NOT std::vector: getBitmap() runs on the render path,
+  // and under -fno-exceptions a vector resize that hits OOM abort()s the firmware instead of
+  // failing (field crash: hotGroup.resize() -> std::bad_alloc -> abort with ~11 KB free).
+  // ensureCapacity() returns false on OOM so the caller can skip the glyph gracefully.
   const EpdFontData* hotGroupFont = nullptr;
   uint16_t hotGroupIndex = UINT16_MAX;
-  std::vector<uint8_t> hotGroup;
+  uint8_t* hotGroup = nullptr;  // owned; freed in freeHotGroup()/dtor
+  uint32_t hotGroupCapacity = 0;
 
   // Scratch buffer for compacting a single glyph from the hot group.
-  // Valid until the next getBitmap() call.
-  std::vector<uint8_t> hotGlyphBuf;
+  // Valid until the next getBitmap() call. Same ownership/OOM contract as hotGroup.
+  uint8_t* hotGlyphBuf = nullptr;
+  uint32_t hotGlyphBufCapacity = 0;
+
+  // Grow (never shrink) an owned buffer to at least `needed` bytes; false on OOM, buffer freed.
+  static bool ensureCapacity(uint8_t*& buf, uint32_t& capacity, uint32_t needed);
 
   void freePageBuffer();
   void freeHotGroup();

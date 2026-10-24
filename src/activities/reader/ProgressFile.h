@@ -28,21 +28,17 @@ namespace ProgressFile {
 // repair an already-corrupted progress.bin -- removing the stale file may itself
 // fail at the FAT level, in which case recovery still requires fsck on a host.
 //
-// Returns true only if the new progress.bin is fully in place.
-inline bool writeAtomic(const std::string& cachePath, const uint8_t* data, size_t len) {
-  const std::string finalPath = cachePath + "/progress.bin";
-  const std::string tmpPath = cachePath + "/progress.bin.tmp";
-
+// Returns true only if the new file is fully in place at finalPath.
+inline bool writeAtomic(const char* finalPath, const char* tmpPath, const uint8_t* data, size_t len) {
   {
     HalFile f;
     if (!Storage.openFileForWrite("PRG", tmpPath, f)) {
-      LOG_ERR("PRG", "Could not open temp progress file for write: %s", tmpPath.c_str());
+      LOG_ERR("PRG", "Could not open temp file for write: %s", tmpPath);
       return false;
     }
     const size_t written = f.write(data, len);
     if (written != len) {
-      LOG_ERR("PRG", "Short write saving progress to %s: %u/%u bytes", tmpPath.c_str(), (unsigned)written,
-              (unsigned)len);
+      LOG_ERR("PRG", "Short write to %s: %u/%u bytes", tmpPath, (unsigned)written, (unsigned)len);
       return false;
     }
     f.flush();
@@ -53,12 +49,19 @@ inline bool writeAtomic(const std::string& cachePath, const uint8_t* data, size_
   // SdFat's rename does not overwrite an existing destination, so drop the old
   // canonical file first. The brief window where neither file exists reads as
   // "no saved progress" on next launch -- never a corrupt, unclearable file.
-  Storage.remove(finalPath.c_str());
-  if (!Storage.rename(tmpPath.c_str(), finalPath.c_str())) {
-    LOG_ERR("PRG", "Failed to rename temp progress into place: %s", finalPath.c_str());
+  Storage.remove(finalPath);
+  if (!Storage.rename(tmpPath, finalPath)) {
+    LOG_ERR("PRG", "Failed to rename temp file into place: %s", finalPath);
     return false;
   }
   return true;
+}
+
+// Returns true only if the new progress.bin is fully in place.
+inline bool writeAtomic(const std::string& cachePath, const uint8_t* data, size_t len) {
+  const std::string finalPath = cachePath + "/progress.bin";
+  const std::string tmpPath = cachePath + "/progress.bin.tmp";
+  return writeAtomic(finalPath.c_str(), tmpPath.c_str(), data, len);
 }
 
 }  // namespace ProgressFile

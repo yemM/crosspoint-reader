@@ -6,52 +6,104 @@
   <title>Files - CrossPoint Reader</title>
   <script src="/js/jszip.min.js"></script>
   <style>
-    :root {
-      --font-color: #333;
-      --bg: #f5f5f5;
-      --title-color: #2c3e50;
-      --card-bg: #FFF;
-      --label-color: #7f8c8d;
-      --border-color: #eee;
-      --accent-color: rgb(110, 154, 130);
-      --accent-color-10: rgba(110, 154, 130, 0.1);
-      --accent-hover-color: #5a8c73;
+    /* Shared presentation for SD-card plugins mounted in the File Manager.
+       Plugin markup stays portable; the host page owns its visual treatment. */
+    #plugin-container {
+      display: grid;
+      gap: 15px;
+      margin: 15px 0;
+    }
+    #plugin-container .card {
+      margin: 0;
+      border: 1px solid var(--border-color);
+    }
+    #plugin-container p {
+      line-height: 1.5;
+    }
+    #plugin-container .setting-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
+      align-items: center;
+      gap: 16px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border-color);
+    }
+    #plugin-container .setting-name {
+      color: var(--label-color);
+      font-weight: 600;
+    }
+    #plugin-container .setting-control {
+      min-width: 0;
+    }
+    #plugin-container input[type="text"],
+    #plugin-container input[type="password"],
+    #plugin-container input[type="number"],
+    #plugin-container select,
+    #plugin-container textarea {
+      width: 100%;
+      min-height: 38px;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      background: var(--card-bg);
+      color: var(--font-color);
+      font: inherit;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+    }
+    #plugin-container textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+    #plugin-container input:focus-visible,
+    #plugin-container select:focus-visible,
+    #plugin-container textarea:focus-visible {
+      border-color: var(--accent-color);
+      outline: 2px solid var(--accent-color);
+      outline-offset: -1px;
+    }
+    #plugin-container .btn-small {
+      min-height: 36px;
+      padding: 8px 12px;
+      border: 1px solid var(--accent-color);
+      border-radius: 6px;
+      background: var(--accent-color-10);
+      color: var(--accent-color);
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.9em;
+      font-weight: 600;
+    }
+    #plugin-container .btn-small:hover:not(:disabled) {
+      background: var(--border-color);
+    }
+    #plugin-container .btn-add {
+      background: var(--accent-color);
+      color: var(--button-text);
+    }
+    #plugin-container .btn-add:hover:not(:disabled) {
+      background: var(--accent-hover-color);
+    }
+    #plugin-container button:focus-visible {
+      outline: 2px solid var(--accent-color);
+      outline-offset: 2px;
+    }
+    #plugin-container button:disabled,
+    #plugin-container input:disabled,
+    #plugin-container select:disabled,
+    #plugin-container textarea:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+    #plugin-container hr {
+      margin: 18px 0;
+      border: 0;
+      border-top: 1px solid var(--border-color);
     }
     @media (prefers-color-scheme: dark) {
-      :root {
-        --font-color: #f5f5f5;
-        --bg: #333;
-        --title-color: #ecf0f1;
-        --card-bg: #444;
-        --label-color: #bdc3c7;
-        --border-color: #555;
-        color-scheme: dark;
+      #plugin-container .card {
+        box-shadow: none;
       }
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-      Oxygen, Ubuntu, sans-serif;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: var(--bg);
-      color: var(--font-color);
-    }
-    h1 {
-      color: var(--title-color);
-      border-bottom: 2px solid var(--accent-color);
-      padding-bottom: 10px;
-    }
-    h2 {
-      color: var(--title-color);
-      margin: 0;
-    }
-    .card {
-      background: var(--card-bg);
-      border-radius: 8px;
-      padding: 20px;
-      margin: 15px 0;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
     .page-header {
       display: flex;
@@ -67,9 +119,14 @@
       gap: 12px;
       flex-wrap: wrap;
     }
+    .web-ui .page-header-left h2 {
+      margin: 0;
+    }
     .breadcrumb-inline {
       color: var(--label-color);
-      font-size: 1.1em;
+      font-size: 1em;
+      font-family: Georgia, serif;
+      font-weight: 400;
     }
     .breadcrumb-inline a {
       color: var(--accent-color);
@@ -84,26 +141,6 @@
     }
     .breadcrumb-inline .current {
       color: var(--title-color);
-      font-weight: 600;
-    }
-    .nav-links {
-      margin: 20px 0;
-      display: flex;
-      gap: 10px;
-    }
-    .nav-links a {
-      padding: 10px 20px;
-      color: var(--font-color);
-      text-decoration: none;
-      border-radius: 4px;
-    }
-    .nav-links a.active {
-      background-color: var(--accent-color);
-      color: white;
-    }
-    .nav-links a:not(.active):hover {
-      background-color: var(--accent-hover-color);
-      color: white;
     }
     /* Action buttons */
     .action-buttons {
@@ -111,7 +148,7 @@
       gap: 10px;
     }
     .action-btn {
-      color: white;
+      color: var(--button-text);
       padding: 10px 16px;
       border: none;
       border-radius: 4px;
@@ -123,51 +160,83 @@
       gap: 6px;
     }
     .upload-action-btn {
-      background-color: #27ae60;
+      background-color: var(--success-color);
     }
     .upload-action-btn:hover {
-      background-color: #219a52;
+      background-color: var(--accent-hover-color);
     }
     .folder-action-btn {
-      background-color: #f39c12;
+      background-color: var(--warning-color);
     }
     .folder-action-btn:hover {
-      background-color: #d68910;
+      background-color: var(--warning-hover);
     }
     .delete-action-btn {
-      background-color: #e74c3c;
+      background-color: var(--danger-color);
     }
     .delete-action-btn:hover {
-      background-color: #c0392b;
+      background-color: var(--danger-hover);
     }
     /* Upload modal */
     .modal-overlay {
-      display: none;
       position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
-      z-index: 200;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      max-height: none;
+      margin: auto;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      overflow: visible;
       justify-content: center;
       align-items: center;
     }
-    .modal-overlay.open {
+    .modal-overlay[open] {
       display: flex;
+    }
+    .modal-overlay::backdrop {
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(8px);
     }
     .modal {
       background: var(--card-bg);
       border-radius: 8px;
       padding: 25px;
       max-width: 450px;
-      width: 90%;
+      width: min(450px, calc(100vw - 24px));
+      box-sizing: border-box;
       max-height: 90vh;
       overflow-y: auto;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
     }
     .modal.picker-mode {
       max-width: 920px;
+      width: min(920px, calc(100vw - 24px));
+    }
+    .modal.image-preview-mode {
+      max-width: 640px;
+      width: min(640px, calc(100vw - 24px));
+    }
+    .image-preview-stage {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: auto;
+      margin-bottom: 15px;
+      border-radius: 6px;
+    }
+    .image-preview-stage img {
+      max-width: 100%;
+      max-height: 65vh;
+      object-fit: contain;
+    }
+    #imagePreviewDownload {
+      display: inline-block;
+      width: auto;
+      text-decoration: none;
     }
     .picker-columns.picker-active {
       display: flex;
@@ -243,16 +312,16 @@
     .epub-badge {
       display: inline-block;
       padding: 2px 8px;
-      background-color: #27ae60;
-      color: white;
+      background-color: var(--success-color);
+      color: var(--button-text);
       border-radius: 10px;
       font-size: 0.75em;
     }
     .folder-badge {
       display: inline-block;
       padding: 2px 8px;
-      background-color: #f39c12;
-      color: white;
+      background-color: var(--warning-color);
+      color: var(--button-text);
       border-radius: 10px;
       font-size: 0.75em;
     }
@@ -271,16 +340,13 @@
       color: var(--accent-hover-color);
       text-decoration: underline;
     }
-    .upload-form {
-      margin-bottom: 10px;
-    }
     .upload-form input[type="file"] {
       margin: 10px 0;
       width: 100%;
     }
     .upload-form input[type="file"]::file-selector-button {
-      background-color: #27ae60;
-      color: white;
+      background-color: var(--success-color);
+      color: var(--button-text);
       border: none;
       padding: 6px 14px;
       border-radius: 4px;
@@ -289,7 +355,7 @@
       margin-right: 8px;
     }
     .upload-form input[type="file"].has-files::file-selector-button {
-      background-color: #95a5a6;
+      background-color: var(--label-color);
     }
     .drop-zone {
       border: 2px dashed var(--border-color);
@@ -313,8 +379,8 @@
       color: var(--accent-color);
     }
     .upload-btn {
-      background-color: #27ae60;
-      color: white;
+      background-color: var(--success-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
       border-radius: 4px;
@@ -324,16 +390,16 @@
       margin-top: 12px;
     }
     .upload-btn:hover {
-      background-color: #219a52;
+      background-color: var(--accent-hover-color);
     }
     .upload-btn.optimize {
-      background-color: #9b59b6;
+      background-color: var(--accent-color);
     }
     .upload-btn.optimize:hover {
-      background-color: #8e44ad;
+      background-color: var(--accent-hover-color);
     }
     .upload-btn:disabled {
-      background-color: #95a5a6;
+      background-color: var(--label-color);
       cursor: not-allowed;
     }
     /* Convert options */
@@ -362,9 +428,9 @@
     }
     .convert-warning {
       font-size: 0.85em;
-      color: #d68910;
+      color: var(--warning-hover);
       background-color: rgba(214, 137, 16, 0.1);
-      border: 1px solid #d68910;
+      border: 1px solid var(--warning-hover);
       border-radius: 4px;
       padding: 8px 12px;
       margin-top: 8px;
@@ -584,7 +650,7 @@
     }
     .quality-preset.active {
       background: var(--accent-color);
-      color: white;
+      color: var(--button-text);
       box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
     /* Toggle Switch */
@@ -664,7 +730,7 @@
     }
     .rotation-btn.active {
       background: var(--accent-color);
-      color: white;
+      color: var(--button-text);
       box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
     .rotation-btn .rot-icon {
@@ -696,7 +762,7 @@
     }
     .overlap-btn.active {
       background: var(--accent-color);
-      color: white;
+      color: var(--button-text);
       box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
     /* Image Picker Grid Styles */
@@ -745,46 +811,46 @@
       border-color: var(--border-color);
     }
     .image-item.state-1 {
-      border-color: #3498db;
+      border-color: var(--info-color);
       background: rgba(52, 152, 219, 0.1);
     }
     .image-item.state-2 {
-      border-color: #e74c3c;
+      border-color: var(--danger-color);
       background: rgba(231, 76, 60, 0.1);
     }
     .image-item.state-3 {
-      border-color: #9b59b6;
+      border-color: var(--secondary-color);
       background: rgba(155, 89, 182, 0.1);
     }
     .image-item.crop-preview {
-      border-color: #16a085;
+      border-color: var(--accent-hover-color);
       background: rgba(22, 160, 133, 0.1);
     }
     .image-item.cover-locked {
-      border-color: #e67e22;
+      border-color: var(--warning-color);
       background: rgba(230, 126, 34, 0.1);
       cursor: default;
       opacity: 0.85;
     }
     .image-item.cover-locked:hover {
       transform: none;
-      border-color: #e67e22;
+      border-color: var(--warning-color);
     }
     .image-item.cover-locked .image-state-badge {
-      background: #e67e22;
+      background: var(--warning-color);
     }
     .image-item.separator-locked {
-      border-color: #1abc9c;
+      border-color: var(--accent-color);
       background: rgba(26, 188, 156, 0.1);
       cursor: default;
       opacity: 0.85;
     }
     .image-item.separator-locked:hover {
       transform: none;
-      border-color: #1abc9c;
+      border-color: var(--accent-color);
     }
     .image-item.separator-locked .image-state-badge {
-      background: #1abc9c;
+      background: var(--accent-color);
     }
     .image-item img {
       width: 100%;
@@ -801,22 +867,22 @@
       border-radius: 4px;
       font-size: 0.65em;
       font-weight: 600;
-      color: white;
+      color: var(--button-text);
     }
     .state-0 .image-state-badge {
       background: var(--label-color);
     }
     .state-1 .image-state-badge {
-      background: #3498db;
+      background: var(--info-color);
     }
     .state-2 .image-state-badge {
-      background: #e74c3c;
+      background: var(--danger-color);
     }
     .state-3 .image-state-badge {
-      background: #9b59b6;
+      background: var(--secondary-color);
     }
     .crop-preview .image-state-badge {
-      background: #16a085;
+      background: var(--accent-hover-color);
     }
     /* Preview Overlay (shown on hover) */
     .image-preview-overlay {
@@ -853,11 +919,11 @@
       border-radius: 2px;
     }
     .split-line.split-h {
-      background: linear-gradient(180deg, #3498db 0%, #2980b9 100%);
+      background: linear-gradient(180deg, var(--info-color) 0%, var(--accent-hover-color) 100%);
       box-shadow: 0 0 6px rgba(0, 0, 0, 0.5), 0 0 2px rgba(52, 152, 219, 0.8);
     }
     .split-line.split-v {
-      background: linear-gradient(180deg, #e74c3c 0%, #c0392b 100%);
+      background: linear-gradient(180deg, var(--danger-color) 0%, var(--danger-hover) 100%);
       box-shadow: 0 0 6px rgba(0, 0, 0, 0.5), 0 0 2px rgba(231, 76, 60, 0.8);
     }
     /* Rotate image on hover for rotation states */
@@ -910,7 +976,7 @@
       border: 1px solid var(--btn-color);
       border-radius: 4px;
       background: transparent;
-      color: var(--text-color);
+      color: var(--font-color);
       cursor: pointer;
       transition: all 0.15s;
       font-size: inherit;
@@ -918,7 +984,7 @@
     }
     .legend-btn:hover {
       background: var(--btn-color);
-      color: white;
+      color: var(--button-text);
     }
     .legend-btn .legend-color {
       background: var(--btn-color);
@@ -935,7 +1001,7 @@
     }
     .no-files {
       text-align: center;
-      color: #95a5a6;
+      color: var(--label-color);
       padding: 40px;
       font-style: italic;
     }
@@ -945,20 +1011,23 @@
       margin: 15px 0;
     }
     .message.success {
-      background-color: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
+      background-color: var(--accent-color-10);
+      color: var(--accent-color);
+      border: 1px solid var(--border-color);
     }
     .message.error {
-      background-color: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
+      background-color: var(--danger-bg);
+      color: var(--danger-color);
+      border: 1px solid var(--danger-border);
     }
     .contents-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 12px;
+    }
+    .web-ui .contents-header h2 {
+      margin: 0;
     }
     .summary-inline {
       color: var(--label-color);
@@ -971,13 +1040,13 @@
     #progress-bar {
       width: 100%;
       height: 20px;
-      background-color: #e0e0e0;
+      background-color: var(--border-color);
       border-radius: 10px;
       overflow: hidden;
     }
     #progress-fill {
       height: 100%;
-      background-color: #27ae60;
+      background-color: var(--success-color);
       width: 0%;
       transition: width 0.3s;
     }
@@ -996,15 +1065,27 @@
     .folder-input {
       width: 100%;
       padding: 10px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--border-color);
       border-radius: 4px;
       font-size: 1em;
       margin-bottom: 10px;
       box-sizing: border-box;
     }
+    .modal-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+      justify-content: flex-end;
+    }
+    .modal-actions > button,
+    .modal-actions > a {
+      width: auto;
+      margin-top: 0;
+    }
     .folder-btn {
-      background-color: #f39c12;
-      color: white;
+      background-color: var(--warning-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
       border-radius: 4px;
@@ -1013,10 +1094,10 @@
       width: 100%;
     }
     .folder-btn:hover {
-      background-color: #d68910;
+      background-color: var(--warning-hover);
     }
     .folder-btn:disabled {
-      background-color: #bdc3c7;
+      background-color: var(--border-color);
       cursor: not-allowed;
     }
     /* Action button styles */
@@ -1032,23 +1113,23 @@
       transition: all 0.15s;
     }
     .delete-btn {
-      color: #95a5a6;
+      color: var(--label-color);
     }
     .delete-btn:hover {
-      background-color: #fee;
-      color: #e74c3c;
+      background-color: var(--danger-bg);
+      color: var(--danger-color);
     }
     .rename-btn {
-      color: #2980b9;
+      color: var(--accent-hover-color);
     }
     .rename-btn:hover {
-      background-color: #e8f4fd;
+      background-color: var(--accent-color-10);
     }
     .move-btn {
-      color: #16a085;
+      color: var(--accent-hover-color);
     }
     .move-btn:hover {
-      background-color: #e6f7f4;
+      background-color: var(--accent-color-10);
     }
     .actions-col {
       width: 140px;
@@ -1062,8 +1143,8 @@
     }
     /* Failed uploads banner */
     .failed-uploads-banner {
-      background-color: #fff3cd;
-      border: 1px solid #ffc107;
+      background-color: var(--warning-bg);
+      border: 1px solid var(--warning-color);
       border-radius: 4px;
       padding: 15px;
       margin-bottom: 15px;
@@ -1080,7 +1161,7 @@
     }
     .failed-uploads-title {
       font-weight: 600;
-      color: #856404;
+      color: var(--warning-text);
       margin: 0;
     }
     .dismiss-btn {
@@ -1088,19 +1169,19 @@
       border: none;
       font-size: 1.2em;
       cursor: pointer;
-      color: #856404;
+      color: var(--warning-text);
       padding: 0;
       line-height: 1;
     }
     .dismiss-btn:hover {
-      color: #533f03;
+      color: var(--warning-text);
     }
     .failed-file-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 8px 0;
-      border-bottom: 1px solid #ffe69c;
+      border-bottom: 1px solid var(--warning-border);
     }
     .failed-file-item:last-child {
       border-bottom: none;
@@ -1110,16 +1191,16 @@
     }
     .failed-file-name {
       font-weight: 500;
-      color: #856404;
+      color: var(--warning-text);
     }
     .failed-file-error {
       font-size: 0.85em;
-      color: #856404;
+      color: var(--warning-text);
       opacity: 0.8;
     }
     .retry-btn {
-      background-color: #ffc107;
-      color: #533f03;
+      background-color: var(--warning-color);
+      color: var(--warning-text);
       border: none;
       padding: 6px 12px;
       border-radius: 4px;
@@ -1128,11 +1209,11 @@
       font-weight: 600;
     }
     .retry-btn:hover {
-      background-color: #e0a800;
+      background-color: var(--warning-hover);
     }
     .retry-all-btn {
-      background-color: #ffc107;
-      color: #533f03;
+      background-color: var(--warning-color);
+      color: var(--warning-text);
       border: none;
       padding: 8px 16px;
       border-radius: 4px;
@@ -1142,11 +1223,11 @@
       margin-top: 10px;
     }
     .retry-all-btn:hover {
-      background-color: #e0a800;
+      background-color: var(--warning-hover);
     }
     /* Delete modal */
     .delete-warning {
-      color: #e74c3c;
+      color: var(--danger-color);
       font-weight: 600;
       margin: 10px 0;
     }
@@ -1156,8 +1237,8 @@
       word-break: break-all;
     }
     .delete-btn-confirm {
-      background-color: #e74c3c;
-      color: white;
+      background-color: var(--danger-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
       border-radius: 4px;
@@ -1166,11 +1247,11 @@
       width: 100%;
     }
     .delete-btn-confirm:hover {
-      background-color: #c0392b;
+      background-color: var(--danger-hover);
     }
     .delete-btn-cancel {
-      background-color: #95a5a6;
-      color: white;
+      background-color: var(--label-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
       border-radius: 4px;
@@ -1183,8 +1264,8 @@
       background-color: var(--label-color);
     }
     .rename-btn-confirm {
-      background-color: #3498db;
-      color: white;
+      background-color: var(--accent-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
       border-radius: 4px;
@@ -1193,11 +1274,11 @@
       width: 100%;
     }
     .rename-btn-confirm:hover {
-      background-color: #2e86c1;
+      background-color: var(--accent-hover-color);
     }
     .move-btn-confirm {
-      background-color: #16a085;
-      color: white;
+      background-color: var(--accent-hover-color);
+      color: var(--button-text);
       padding: 10px 20px;
       border: none;
       border-radius: 4px;
@@ -1206,7 +1287,7 @@
       width: 100%;
     }
     .move-btn-confirm:hover {
-      background-color: #138d75;
+      background-color: var(--accent-hover-color);
     }
     .loader-container {
       display: flex;
@@ -1217,7 +1298,7 @@
     .loader {
       width: 48px;
       height: 48px;
-      border: 5px solid #AAA;
+      border: 5px solid var(--border-color);
       border-bottom-color: transparent;
       border-radius: 50%;
       display: inline-block;
@@ -1243,6 +1324,31 @@
         padding: 12px;
         margin: 10px 0;
       }
+      #plugin-container {
+        gap: 10px;
+        margin: 10px 0;
+      }
+      #plugin-container .card {
+        margin: 0;
+      }
+      #plugin-container .setting-row {
+        grid-template-columns: 1fr;
+        gap: 7px;
+        padding: 12px 0;
+      }
+      #plugin-container input[type="text"],
+      #plugin-container input[type="password"],
+      #plugin-container input[type="number"],
+      #plugin-container select,
+      #plugin-container textarea {
+        min-height: 44px;
+        font-size: 16px;
+      }
+      #plugin-container .btn-small {
+        min-height: 48px;
+        padding: 10px 12px;
+        font-size: 1em;
+      }
       .page-header {
         gap: 10px;
         margin-bottom: 12px;
@@ -1261,6 +1367,9 @@
         padding: 8px 12px;
         margin-right: 6px;
         font-size: 0.9em;
+      }
+      .modal-actions {
+        flex-direction: column-reverse;
       }
       .action-buttons {
         gap: 6px;
@@ -1374,13 +1483,13 @@
       color: var(--accent-color);
     }
     .log-entry.error {
-      color: #e74c3c;
+      color: var(--danger-color);
     }
     .log-entry.warning {
-      color: #f39c12;
+      color: var(--warning-color);
     }
     .log-entry.info {
-      color: #3498db;
+      color: var(--accent-color);
     }
     .log-timestamp {
       color: var(--label-color);
@@ -1403,27 +1512,27 @@
     }
     .log-tag.split {
       background: rgba(243, 156, 18, 0.15);
-      color: #f39c12;
+      color: var(--warning-color);
     }
     .log-tag.fix {
       background: rgba(39, 174, 96, 0.15);
-      color: #27ae60;
+      color: var(--success-color);
     }
     .log-tag.skip {
       background: rgba(127, 140, 141, 0.15);
-      color: #7f8c8d;
+      color: var(--label-color);
     }
     .log-tag.info {
       background: rgba(52, 152, 219, 0.15);
-      color: #3498db;
+      color: var(--accent-color);
     }
     .log-tag.error {
       background: rgba(231, 76, 60, 0.15);
-      color: #e74c3c;
+      color: var(--danger-color);
     }
     .log-tag.done {
       background: rgba(39, 174, 96, 0.15);
-      color: #27ae60;
+      color: var(--success-color);
     }
     .log-message {
       flex: 1;
@@ -1472,39 +1581,36 @@
       color: var(--accent-color);
     }
     .log-summary-table .saved {
-      color: #27ae60;
+      color: var(--success-color);
     }
     .log-summary-table .increased {
-      color: #f39c12;
+      color: var(--warning-color);
     }
   </style>
+  <link rel="stylesheet" href="/assets/web.css" />
+  <link rel="icon" type="image/svg+xml" href="/assets/crosspoint-icon.svg" />
 </head>
-<body>
-<h1>📚 CrossPoint Reader</h1>
+<body class="web-ui">
+<!--#include file="shared/Header.html.inc" -->
+<main class="page-content">
 
-<div class="nav-links">
-  <a href="/">Home</a>
-  <a href="/files" class="active">File Manager</a>
-  <a href="/settings">Settings</a>
-  <a href="/fonts">Fonts</a>
-</div>
 
 <div class="page-header">
   <div class="page-header-left">
-    <h2>📁 File Manager</h2>
+    <h2>File Manager</h2>
   </div>
 
   <div class="action-buttons">
-    <button class="action-btn upload-action-btn" onclick="openUploadModal()">📤 Upload</button>
-    <button class="action-btn folder-action-btn" onclick="openFolderModal()">📁 New Folder</button>
-    <button class="action-btn delete-action-btn" onclick="openDeleteSelectedModal()">🗑️ Delete Selected</button>
+    <button class="action-btn upload-action-btn" onclick="openUploadModal()"><svg class="icon"><use href="/assets/icons.svg#upload"></use></svg> Upload</button>
+    <button class="action-btn folder-action-btn" onclick="openFolderModal()"><svg class="icon"><use href="/assets/icons.svg#folder"></use></svg> New Folder</button>
+    <button class="action-btn delete-action-btn" onclick="openDeleteSelectedModal()"><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg> Delete Selected</button>
   </div>
 </div>
 
 <!-- Failed Uploads Banner -->
 <div class="failed-uploads-banner" id="failedUploadsBanner">
   <div class="failed-uploads-header">
-    <h3 class="failed-uploads-title">⚠️ Some files failed to upload</h3>
+    <h3 class="failed-uploads-title"><svg class="icon"><use href="/assets/icons.svg#warning"></use></svg> Some files failed to upload</h3>
     <button class="dismiss-btn" onclick="dismissFailedUploads()" title="Dismiss">&times;</button>
   </div>
   <div id="failedFilesList"></div>
@@ -1513,7 +1619,7 @@
 
 <div class="card">
   <div class="contents-header">
-    <div class="breadcrumb-inline" id="directory-breadcrumbs"></div>
+    <h2 class="breadcrumb-inline" id="directory-breadcrumbs"></h2>
     <span class="summary-inline" id="folder-summary"></span>
   </div>
 
@@ -1524,17 +1630,16 @@
   </div>
 </div>
 
-<div class="card">
-  <p style="text-align: center; color: #95a5a6; margin: 0;">
-    CrossPoint E-Reader • Open Source
-  </p>
-</div>
+<div id="plugin-container"></div>
+
+</main>
+<!--#include file="shared/Footer.html.inc" -->
 
 <!-- Upload Modal -->
-<div class="modal-overlay" id="uploadModal">
+<dialog class="modal-overlay" id="uploadModal" aria-labelledby="uploadModalTitle">
   <div class="modal">
-    <button class="modal-close" id="uploadModalClose" onclick="closeUploadModal()">&times;</button>
-    <h3>📤 Upload file</h3>
+    <button class="modal-close" aria-label="Close upload dialog" id="uploadModalClose" onclick="closeUploadModal()">&times;</button>
+    <h3 id="uploadModalTitle"><svg class="icon"><use href="/assets/icons.svg#upload"></use></svg> Upload file</h3>
     <div class="upload-form">
       <p class="file-info">Select a file to upload to <strong id="uploadPathDisplay"></strong></p>
       <div class="drop-zone" id="dropZone">
@@ -1558,17 +1663,30 @@
           <div id="convertInfo" style="display:none; margin-bottom: 10px; font-size: 0.9em;">
           </div>
 
+          <div class="advanced-setting-row">
+            <div class="setting-label">
+              <div class="setting-title">Rename from Book Metadata</div>
+              <div class="setting-desc">Use Title - Author.epub when available</div>
+            </div>
+            <div class="setting-controls">
+              <label class="toggle-switch">
+                <input type="checkbox" id="renameFromMetadataToggle" onchange="updateUploadSettingsPersistence()">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
           <div class="convert-settings" id="convertSettings" style="display:block;">
             <span>⚫ True-Grayscale</span>
-          <span id="convertSizeSummary">📏 Max 480×800px</span>
-          <span>📦 85% JPEG</span>
-          <span>🔧 Fix SVG</span>
+          <span id="convertSizeSummary">Max 480×800px</span>
+          <span>85% JPEG</span>
+          <span>Fix SVG</span>
         </div>
         <!-- Advanced Settings Content -->
         <div class="advanced-settings-content" id="advancedSettingsContent">
           <!-- JPEG Quality -->
           <div class="advanced-setting-row quality-row">
-            <div class="setting-title">📦 JPEG Quality</div>
+            <div class="setting-title">JPEG Quality</div>
             <div class="quality-presets">
               <button class="quality-preset" data-value="30" onclick="setQualityPreset(30)" title="Minimum quality">30%</button>
               <button class="quality-preset" data-value="45" onclick="setQualityPreset(45)" title="Low quality">45%</button>
@@ -1610,7 +1728,7 @@
           </div>
           <!-- Target Device -->
           <div class="advanced-setting-row" id="deviceSettingRow">
-            <div class="setting-title">📱 Target Device</div>
+            <div class="setting-title">Target Device</div>
             <div class="setting-controls">
               <div class="rotation-buttons">
                 <button class="rotation-btn device-btn active" data-value="auto" onclick="setDeviceTarget('auto')">
@@ -1637,7 +1755,7 @@
           </div>
           <!-- Overlap Settings -->
           <div class="advanced-setting-row" id="overlapSettingRow">
-            <div class="setting-title">📐 Min Overlap</div>
+            <div class="setting-title">Min Overlap</div>
             <div class="setting-controls">
               <div class="overlap-selector">
                 <button class="overlap-btn active" data-value="5" onclick="setOverlap(5)">5%</button>
@@ -1649,12 +1767,24 @@
           <!-- Conversion Log Export -->
           <div class="advanced-setting-row">
             <div class="setting-label">
-              <div class="setting-title">📥 Auto-download Log</div>
+              <div class="setting-title">Auto-download Log</div>
               <div class="setting-desc">Export detailed log with statistics</div>
             </div>
             <div class="setting-controls">
               <label class="toggle-switch">
-                <input type="checkbox" id="export-log-checkbox">
+                <input type="checkbox" id="export-log-checkbox" onchange="updateUploadSettingsPersistence()">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+          <div class="advanced-setting-row">
+            <div class="setting-label">
+              <div class="setting-title">Remember Settings</div>
+              <div class="setting-desc">Store these upload options in this browser</div>
+            </div>
+            <div class="setting-controls">
+              <label class="toggle-switch">
+                <input type="checkbox" id="rememberUploadSettings" onchange="updateUploadSettingsPersistence()">
                 <span class="toggle-slider"></span>
               </label>
             </div>
@@ -1664,31 +1794,31 @@
       <!-- Image Picker Section - in picker-columns for two-column layout -->
       <div class="image-picker-section" id="imagePickerSection" style="display:none;">
         <div class="image-picker-header">
-          <span class="image-picker-title">🖼️ Image Processing Options</span>
+          <span class="image-picker-title">Image Processing Options</span>
           <span class="image-picker-count" id="imagePickerCount">0 images</span>
         </div>
         <div class="state-legend">
           <div class="legend-item locked">
-            <span>🔒</span>
+            <svg class="icon"><use href="/assets/icons.svg#lock"></use></svg>
             <span>Cover</span>
           </div>
           <div class="legend-item locked">
-            <span style="color:#1abc9c">✦</span>
+            <span style="color:var(--accent-color)">✦</span>
             <span>Separator</span>
           </div>
           <button class="legend-btn" style="--btn-color:var(--label-color)" onclick="applyStateToAll(0)">
             <div class="legend-color"></div>
             <span>Normal</span>
           </button>
-          <button class="legend-btn" style="--btn-color:#3498db" onclick="applyStateToAll(1)">
+          <button class="legend-btn" style="--btn-color:var(--info-color)" onclick="applyStateToAll(1)">
             <div class="legend-color"></div>
             <span>H-Split</span>
           </button>
-          <button class="legend-btn" style="--btn-color:#e74c3c" onclick="applyStateToAll(2)">
+          <button class="legend-btn" style="--btn-color:var(--danger-color)" onclick="applyStateToAll(2)">
             <div class="legend-color"></div>
             <span>V-Split</span>
           </button>
-          <button class="legend-btn" style="--btn-color:#9b59b6" onclick="applyStateToAll(3)">
+          <button class="legend-btn" style="--btn-color:var(--secondary-color)" onclick="applyStateToAll(3)">
             <div class="legend-color"></div>
             <span>Rotate</span>
           </button>
@@ -1702,82 +1832,107 @@
         Please back up or disable sync before proceeding.
       </div>
       <!-- Optimize & Upload button - shown when picker is visible, replaces Upload -->
-      <button id="startConversionBtn" class="upload-btn optimize" style="display:none;" onclick="startConversionWithImageStates()">Optimize & Upload</button>
-      <button id="uploadBtn" class="upload-btn" onclick="uploadFile()" disabled>Upload</button>
-      <button class="delete-btn-cancel" onclick="handleCancelUploadModal()">Cancel</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="handleCancelUploadModal()">Cancel</button>
+        <button id="uploadBtn" class="upload-btn" onclick="uploadFile()" disabled>Upload</button>
+        <button id="startConversionBtn" class="upload-btn optimize" style="display:none;" onclick="startConversionWithImageStates()">Optimize & Upload</button>
+      </div>
       <div id="progress-container">
         <div id="progress-bar"><div id="progress-fill"></div></div>
         <div id="progress-text"></div>
       </div>
       <div class="log-section" id="log-section">
         <div class="log-header">
-          <div class="log-title">📋 Conversion Log</div>
+          <div class="log-title">Conversion Log</div>
         </div>
         <div class="log-container" id="log-container"></div>
       </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- New Folder Modal -->
-<div class="modal-overlay" id="folderModal">
+<dialog class="modal-overlay" id="folderModal" aria-labelledby="folderModalTitle">
   <div class="modal">
-    <button class="modal-close" onclick="closeFolderModal()">&times;</button>
-    <h3>📁 New Folder</h3>
+    <button class="modal-close" aria-label="Close folder dialog" onclick="closeFolderModal()">&times;</button>
+    <h3 id="folderModalTitle"><svg class="icon"><use href="/assets/icons.svg#folder"></use></svg> New Folder</h3>
     <div class="folder-form">
       <p class="file-info">Create a new folder in <strong id="folderPathDisplay"></strong></p>
       <input type="text" id="folderName" class="folder-input" placeholder="Folder name..." oninput="document.getElementById('createFolderBtn').disabled = !this.value.trim();">
-      <button class="folder-btn" id="createFolderBtn" onclick="createFolder()" disabled>Create Folder</button>
-      <button class="delete-btn-cancel" onclick="closeFolderModal()">Cancel</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="closeFolderModal()">Cancel</button>
+        <button class="folder-btn" id="createFolderBtn" onclick="createFolder()" disabled>Create Folder</button>
+      </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- Delete Confirmation Modal -->
-<div class="modal-overlay" id="deleteModal">
+<dialog class="modal-overlay" id="deleteModal" aria-labelledby="deleteModalTitle">
   <div class="modal">
-    <button class="modal-close" onclick="closeDeleteModal()">&times;</button>
-    <h3>🗑️ Delete Item(s)</h3>
+    <button class="modal-close" aria-label="Close delete dialog" onclick="closeDeleteModal()">&times;</button>
+    <h3 id="deleteModalTitle"><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg> Delete Item(s)</h3>
     <div class="folder-form">
-      <p class="delete-warning">⚠️ This action cannot be undone!</p>
+      <p class="delete-warning"><svg class="icon"><use href="/assets/icons.svg#warning"></use></svg> This action cannot be undone!</p>
       <p class="file-info">Are you sure you want to delete the following item(s)?</p>
       <div id="deleteItemList" style="max-height:240px; overflow:auto; margin-bottom:10px;"></div>
-      <button class="delete-btn-confirm" onclick="confirmDelete()">Delete</button>
-      <button class="delete-btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+        <button class="delete-btn-confirm" onclick="confirmDelete()">Delete</button>
+      </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- Rename Modal -->
-<div class="modal-overlay" id="renameModal">
+<dialog class="modal-overlay" id="renameModal" aria-labelledby="renameModalTitle">
   <div class="modal">
-    <button class="modal-close" onclick="closeRenameModal()">&times;</button>
-    <h3>✏️ Rename File</h3>
+    <button class="modal-close" aria-label="Close rename dialog" onclick="closeRenameModal()">&times;</button>
+    <h3 id="renameModalTitle"><svg class="icon"><use href="/assets/icons.svg#edit"></use></svg> Rename File</h3>
     <div class="folder-form">
       <p class="file-info">Renaming <strong id="renameItemName"></strong></p>
       <input type="text" id="renameNewName" class="folder-input" placeholder="New file name...">
       <input type="hidden" id="renameItemPath">
-      <button class="rename-btn-confirm" onclick="confirmRename()">Rename</button>
-      <button class="delete-btn-cancel" onclick="closeRenameModal()">Cancel</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="closeRenameModal()">Cancel</button>
+        <button class="rename-btn-confirm" onclick="confirmRename()">Rename</button>
+      </div>
     </div>
   </div>
-</div>
+</dialog>
 
 <!-- Move Modal -->
-<div class="modal-overlay" id="moveModal">
+<dialog class="modal-overlay" id="moveModal" aria-labelledby="moveModalTitle">
   <div class="modal">
-    <button class="modal-close" onclick="closeMoveModal()">&times;</button>
-    <h3>📂 Move File</h3>
+    <button class="modal-close" aria-label="Close move dialog" onclick="closeMoveModal()">&times;</button>
+    <h3 id="moveModalTitle"><svg class="icon"><use href="/assets/icons.svg#move"></use></svg> Move File</h3>
     <div class="folder-form">
       <p class="file-info">Moving <strong id="moveItemName"></strong></p>
       <input type="text" id="moveDestPath" class="folder-input" list="moveFolderOptions" placeholder="/Destination/Folder">
       <datalist id="moveFolderOptions"></datalist>
       <input type="hidden" id="moveItemPath">
-      <button class="move-btn-confirm" onclick="confirmMove()">Move</button>
-      <button class="delete-btn-cancel" onclick="closeMoveModal()">Cancel</button>
+      <div class="modal-actions">
+        <button class="delete-btn-cancel" onclick="closeMoveModal()">Cancel</button>
+        <button class="move-btn-confirm" onclick="confirmMove()">Move</button>
+      </div>
     </div>
   </div>
-</div>
+</dialog>
+
+<!-- Image Preview Modal -->
+<dialog class="modal-overlay" id="imagePreviewModal" aria-labelledby="imagePreviewModalTitle">
+  <div class="modal image-preview-mode">
+    <button class="modal-close" aria-label="Close image preview dialog" onclick="closeImagePreview()">&times;</button>
+    <h3 id="imagePreviewModalTitle">Preview</h3>
+    <div class="folder-form">
+      <p class="file-info"><strong id="imagePreviewName"></strong></p>
+      <div class="image-preview-stage">
+        <img id="imagePreviewImg" alt="">
+      </div>
+      <a id="imagePreviewDownload" class="move-btn-confirm" rel="noopener noreferrer" target="_blank" href="#">Download</a>
+    </div>
+  </div>
+</dialog>
 
 <script>
   // get current path from query parameter
@@ -1838,12 +1993,15 @@
       document.body.appendChild(notification);
     }
 
+    clearTimeout(notification.hideTimer);
+    clearTimeout(notification.removeTimer);
+
     // Set styles based on type
     const styles = {
-      'success': 'background-color: #27ae60;',
-      'error': 'background-color: #e74c3c;',
-      'warning': 'background-color: #f39c12;',
-      'info': 'background-color: #3498db;'
+      'success': 'background-color: var(--button-bg); color: var(--button-text);',
+      'error': 'background-color: var(--danger-bg); color: var(--danger-color);',
+      'warning': 'background-color: var(--warning-bg); color: var(--warning-text);',
+      'info': 'background-color: var(--accent-color-10); color: var(--accent-color);'
     };
     notification.style.cssText += styles[type] || styles['info'];
     notification.textContent = message;
@@ -1853,15 +2011,19 @@
     notification.style.transform = 'translateX(0)';
 
     // Auto-hide after 5 seconds
-    setTimeout(() => {
+    notification.hideTimer = setTimeout(() => {
       notification.style.opacity = '0';
       notification.style.transform = 'translateX(100%)';
-      setTimeout(() => {
+      notification.removeTimer = setTimeout(() => {
         if (notification.parentNode) {
           notification.parentNode.removeChild(notification);
         }
       }, 300);
     }, 5000);
+  }
+
+  function fileIcon(name) {
+    return `<svg class="icon"><use href="/assets/icons.svg#${name}"></use></svg>`;
   }
 
   function formatFileSize(bytes) {
@@ -1876,18 +2038,25 @@
     // Fetch CrossPoint version
     fetchVersion();
 
-    // Close modals when clicking overlay - call proper cleanup functions
-    document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
-      overlay.addEventListener('click', function(e) {
-        if (e.target === overlay) {
-          // Call the appropriate close function for each modal to ensure cleanup
-          if (overlay.id === 'uploadModal') return closeUploadModal();
-          if (overlay.id === 'folderModal') return closeFolderModal();
-          if (overlay.id === 'deleteModal') return closeDeleteModal();
-          if (overlay.id === 'renameModal') return closeRenameModal();
-          if (overlay.id === 'moveModal') return closeMoveModal();
-          overlay.classList.remove('open');
-        }
+    // Load any SD-hosted plugins that mount on the File Manager page.
+    loadPlugins('files');
+
+    // Keep upload cleanup rules when a dialog is cancelled or its backdrop is clicked.
+    const closeModal = {
+      uploadModal: closeUploadModal,
+      folderModal: closeFolderModal,
+      deleteModal: closeDeleteModal,
+      renameModal: closeRenameModal,
+      moveModal: closeMoveModal,
+      imagePreviewModal: closeImagePreview
+    };
+    document.querySelectorAll('dialog.modal-overlay').forEach(function(modal) {
+      modal.addEventListener('cancel', function(event) {
+        event.preventDefault();
+        closeModal[modal.id]();
+      });
+      modal.addEventListener('click', function(event) {
+        if (event.target === modal) closeModal[modal.id]();
       });
     });
 
@@ -1919,9 +2088,9 @@
     };
 
     if (segments.length === 0) {
-      appendCurrent('🏠 Home');
+      appendCurrent('Home');
     } else {
-      appendLink('🏠 Home', '/files');
+      appendLink('Home', '/files');
       segments.forEach(function(segment, index) {
         appendSep();
         if (index === segments.length - 1) {
@@ -1956,15 +2125,18 @@
     const fileCount = files.length - folderCount;
     const folderLabel = folderCount === 1 ? 'folder' : 'folders';
     const fileLabel = fileCount === 1 ? 'file' : 'files';
-    document.getElementById('folder-summary').innerHTML = `${folderCount} ${folderLabel}, ${fileCount} ${fileLabel}, ${formatFileSize(totalSize)}`;
+    const summary = [];
+    if (folderCount) summary.push(`${folderCount} ${folderLabel}`);
+    if (fileCount) summary.push(`${fileCount} ${fileLabel}`, formatFileSize(totalSize));
+    document.getElementById('folder-summary').textContent = summary.join(', ');
 
     if (files.length === 0) {
       fileTable.innerHTML = '<div class="no-files">This folder is empty</div>';
     } else {
-      let fileTableContent = '<table class="file-table">';
+      let fileTableContent = '<table class="file-table"><thead>';
 
 				// Add select-all checkbox column
-      fileTableContent += '<tr><th style="width:40px"><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"></th><th>Name</th><th>Type</th><th>Size</th><th class="actions-col">Actions</th></tr>';
+      fileTableContent += '<tr><th style="width:40px"><label><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)"><span class="select-all-label"> Select all</span></label></th><th>Name</th><th>Type</th><th>Size</th><th class="actions-col">Actions</th></tr></thead><tbody>';
 
 
       const sortedFiles = files.sort((a, b) => {
@@ -1985,10 +2157,10 @@
          // Checkbox cell + folder row
           fileTableContent += `<tr class="folder-row">`;
           fileTableContent += `<td><input type="checkbox" class="select-item" data-path="${encodeURIComponent(folderPath)}" data-name="${escapeHtml(file.name)}" data-type="folder"></td>`;
-          fileTableContent += `<td><span class="file-icon">📁</span><a href="/files?path=${encodeURIComponent(folderPath)}" class="folder-link">${escapeHtml(file.name)}</a></td>`;
-          fileTableContent += '<td><span class="folder-badge">FOLDER</span></td>';
+          fileTableContent += `<td><span class="file-icon"><svg class="icon"><use href="/assets/icons.svg#folder"></use></svg></span><a href="/files?path=${encodeURIComponent(folderPath)}" class="folder-link">${escapeHtml(file.name)}</a></td>`;
+          fileTableContent += '<td>FOLDER</td>';
           fileTableContent += '<td>-</td>';
-          fileTableContent += `<td class="actions-col"><div class="action-icon-group"><button class="delete-btn" onclick="openDeleteModal('${file.name.replaceAll("'", "\\'")}', '${folderPath.replaceAll("'", "\\'")}', true)" title="Delete folder">🗑️</button></div></td>`;
+          fileTableContent += `<td class="actions-col"><div class="action-icon-group"><button class="delete-btn" data-action="delete" data-name="${escapeHtml(file.name)}" data-path="${escapeHtml(folderPath)}" data-folder="true" title="Delete folder" aria-label="Delete folder"><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg></button></div></td>`;
           fileTableContent += '</tr>';
         } else {
           let filePath = currentPath;
@@ -1998,33 +2170,68 @@
           // Checkbox cell + file row
           fileTableContent += `<tr class="${file.isEpub ? 'epub-file' : ''}">`;
           fileTableContent += `<td><input type="checkbox" class="select-item" data-path="${encodeURIComponent(filePath)}" data-name="${escapeHtml(file.name)}" data-type="file"></td>`;
-          fileTableContent += `<td><span class="file-icon">${file.isEpub ? '📗' : '📄'}</span>`;
-          fileTableContent += `<a rel="noopener noreferrer" target="_blank" href="/download?path=${encodeURIComponent(filePath)}" class="file-link">${escapeHtml(file.name)}</a>`;
+          const fileIsImage = isImageFile(file.name);
+          fileTableContent += `<td><span class="file-icon">${fileIcon(file.isEpub ? 'book' : (fileIsImage ? 'image' : 'file'))}</span>`;
+          if (fileIsImage) {
+            fileTableContent += `<a href="${downloadUrl(filePath)}" class="file-link image-preview-link">${escapeHtml(file.name)}</a>`;
+          } else {
+            fileTableContent += `<a rel="noopener noreferrer" target="_blank" href="${downloadUrl(filePath)}" class="file-link">${escapeHtml(file.name)}</a>`;
+          }
           fileTableContent += '</td>';
-          fileTableContent += file.isEpub ? '<td><span class="epub-badge">EPUB</span></td>' : `<td>${escapeHtml(file.name.split('.').pop().toUpperCase())}</td>`;
+          fileTableContent += file.isEpub ? '<td>EPUB</td>' : `<td>${escapeHtml(file.name.split('.').pop().toUpperCase())}</td>`;
           fileTableContent += `<td>${formatFileSize(file.size)}</td>`;
           fileTableContent += `<td class="actions-col"><div class="action-icon-group">`;
-          fileTableContent += `<button class="move-btn" onclick="openMoveModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}' )" title="Move file">📂</button>`;
-          fileTableContent += `<button class="rename-btn" onclick="openRenameModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}' )" title="Rename file">✏️</button>`;
-          fileTableContent += `<button class="delete-btn" onclick="openDeleteModal('${file.name.replaceAll("'", "\\'")}', '${filePath.replaceAll("'", "\\'")}', false)" title="Delete file">🗑️</button>`;
+          fileTableContent += `<button class="move-btn" data-action="move" data-name="${escapeHtml(file.name)}" data-path="${escapeHtml(filePath)}" title="Move file" aria-label="Move file"><svg class="icon"><use href="/assets/icons.svg#move"></use></svg></button>`;
+          fileTableContent += `<button class="rename-btn" data-action="rename" data-name="${escapeHtml(file.name)}" data-path="${escapeHtml(filePath)}" title="Rename file" aria-label="Rename file"><svg class="icon"><use href="/assets/icons.svg#edit"></use></svg></button>`;
+          fileTableContent += `<button class="delete-btn" data-action="delete" data-name="${escapeHtml(file.name)}" data-path="${escapeHtml(filePath)}" data-folder="false" title="Delete file" aria-label="Delete file"><svg class="icon"><use href="/assets/icons.svg#trash"></use></svg></button>`;
           fileTableContent += `</div></td>`;
           fileTableContent += '</tr>';
         }
       });
 
-      fileTableContent += '</table>';
+      fileTableContent += '</tbody></table>';
       fileTable.innerHTML = fileTableContent;
     }
   }
 
+  // Image preview
+  function isImageFile(name) {
+    return /\.(png|jpe?g|bmp|gif|webp)$/i.test(name);
+  }
+
+  function downloadUrl(filePath) {
+    return `/download?path=${encodeURIComponent(filePath)}`;
+  }
+
+  function openWebModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal.open) modal.showModal();
+  }
+
+  function closeWebModal(id) {
+    const modal = document.getElementById(id);
+    if (modal.open) modal.close();
+  }
+
+  function openImagePreview(url, name) {
+    const img = document.getElementById('imagePreviewImg');
+    document.getElementById('imagePreviewName').textContent = name;
+    img.src = url;
+    img.alt = name;
+    document.getElementById('imagePreviewDownload').href = url;
+    openWebModal('imagePreviewModal');
+  }
+
+  function closeImagePreview() {
+    closeWebModal('imagePreviewModal');
+    // Clear src to free the decoded image and avoid showing the stale one on reopen.
+    document.getElementById('imagePreviewImg').src = '';
+  }
+
   // Modal functions
   function openUploadModal() {
-    // Reset converter variables to defaults
-    ENABLE_GRAYSCALE = true;
-    JPEG_QUALITY = 85;
-    HANDEDNESS = 'right';
-    OVERLAP_PERCENT = 5;
     imageStates = {};
+    restoreUploadSettingsFromStorage();
 
     // Hide convert options when opening modal (no files selected initially)
     const convertOptions = document.getElementById('convertOptions');
@@ -2032,18 +2239,14 @@
       convertOptions.style.display = 'none';
     }
 
-    // Reset rotation and overlap UI
-    setHandedness('right');
-    setOverlap(5);
-    
     // Hide log section from previous session
     const logSection = document.getElementById('log-section');
     if (logSection) logSection.classList.remove('visible');
     const logContainer = document.getElementById('log-container');
     if (logContainer) logContainer.innerHTML = '';
 
-    document.getElementById('uploadPathDisplay').textContent = currentPath === '/' ? '/ 🏠' : currentPath;
-    document.getElementById('uploadModal').classList.add('open');
+    document.getElementById('uploadPathDisplay').textContent = currentPath;
+    openWebModal('uploadModal');
   }
 
   function handleCancelUploadModal() {
@@ -2067,8 +2270,8 @@
     const progressFill = document.getElementById('progress-fill');
     const progressText = document.getElementById('progress-text');
     progressFill.style.width = '0%';
-    progressFill.style.backgroundColor = '#e74c3c';
-    progressText.style.color = '#e74c3c';
+    progressFill.style.backgroundColor = 'var(--danger-color)';
+    progressText.style.color = 'var(--danger-color)';
     progressText.textContent = 'Upload cancelled by User!';
     // Re-enable the action button (uploadBtn is always visible at this point;
     // its text is already "Upload" or "Optimize & Upload" depending on checkbox state)
@@ -2080,7 +2283,7 @@
     if (isUploadInProgress) {
       return;
     }
-    document.getElementById('uploadModal').classList.remove('open');
+    closeWebModal('uploadModal');
     const fileInput = document.getElementById('fileInput');
     fileInput.value = '';
     fileInput.classList.remove('has-files');
@@ -2094,7 +2297,8 @@
     document.getElementById('progress-container').style.display = 'none';
     document.getElementById('progress-fill').style.width = '0%';
     document.getElementById('progress-fill').style.backgroundColor = '#27ae60';
-    document.getElementById('convertBeforeUpload').checked = false;
+    const convertOptions = document.getElementById('convertOptions');
+    if (convertOptions) convertOptions.style.display = 'none';
     document.getElementById('convertInfo').style.display = 'none';
     document.getElementById('convertWarning').style.display = 'none';
     // Clear image picker cache and reset layout
@@ -2117,15 +2321,7 @@
       advancedOptionsToggle.style.opacity = '0.5';
       advancedOptionsToggle.style.pointerEvents = 'none';
     }
-    // Reset to defaults
-    document.getElementById('qualitySlider').value = 85;
-    document.getElementById('qualityInput').value = 85;
-    const autoCropToggle = document.getElementById('autoCropToggle');
-    if (autoCropToggle) autoCropToggle.checked = false;
-    setHandedness('right');
-    setOverlap(5);
-    // Update converter variables
-    updateQualitySettings();
+    applyUploadSettings();
   }
 
   function updateBatchModeUI(isBatch) {
@@ -2162,6 +2358,7 @@
       advancedOptionsToggle.style.opacity = checked ? '1' : '0.5';
       advancedOptionsToggle.style.pointerEvents = checked ? 'auto' : 'none';
     }
+    updateUploadSettingsPersistence();
   }
 
   function toggleAdvancedOptions() {
@@ -2199,12 +2396,8 @@
   function setQualityPreset(value) {
     document.getElementById('qualitySlider').value = value;
     document.getElementById('qualityInput').value = value;
-    // Update active preset
     document.querySelectorAll('.quality-preset').forEach(btn => {
-      btn.classList.remove('active');
-      if (parseInt(btn.dataset.value, 10) === value) {
-        btn.classList.add('active');
-      }
+      btn.classList.toggle('active', parseInt(btn.dataset.value, 10) === value);
     });
     updateQualitySettings();
   }
@@ -2216,7 +2409,7 @@
     // Update displays (if element exists)
     const qualityDisplay = document.getElementById('qualityDisplaySimple');
     if (qualityDisplay) {
-      qualityDisplay.textContent = '📦 ' + quality + '% JPEG';
+      qualityDisplay.textContent = quality + '% JPEG';
     }
 
     // Update converter variables (used by processImage and applyGrayscale)
@@ -2226,6 +2419,7 @@
     if (isImagePickerVisible()) {
       renderImageGrid();
     }
+    updateUploadSettingsPersistence();
   }
 
   function setHandedness(value) {
@@ -2238,6 +2432,7 @@
     if (isImagePickerVisible()) {
       renderImageGrid();
     }
+    updateUploadSettingsPersistence();
   }
 
   function setOverlap(value) {
@@ -2246,6 +2441,7 @@
     document.querySelectorAll('.overlap-btn').forEach(btn => {
       btn.classList.toggle('active', parseInt(btn.dataset.value) === value);
     });
+    updateUploadSettingsPersistence();
   }
 
   function isImagePickerVisible() {
@@ -2641,7 +2837,7 @@
     // Check if JSZip is available
     if (typeof JSZip === 'undefined') {
       console.error('JSZip not loaded');
-      alert('JSZip library not available. Conversion will proceed without image picker.');
+      showWebAlert('JSZip library not available. Conversion will proceed without image picker.');
       startConversionWithImageStates();
       return;
     }
@@ -2699,7 +2895,7 @@
 
     } catch (error) {
       console.error('Failed to extract images:', error);
-      alert('Failed to preview images: ' + error.message + '\n\nConversion will proceed normally.');
+      showWebAlert('Failed to preview images: ' + error.message + '\n\nConversion will proceed normally.');
       // Fallback: start conversion directly
       startConversionWithImageStates();
     }
@@ -2728,7 +2924,7 @@
         item.className = 'image-item cover-locked';
         item.title = `${img.width}×${img.height} - Cover image (locked)`;
         item.innerHTML = `
-          <span class="image-state-badge cover-badge">🔒</span>
+          <span class="image-state-badge cover-badge">${fileIcon('lock')}</span>
           <img src="${img.dataUrl}" alt="${img.name}" loading="lazy">
           <div class="image-name">${img.name}</div>
         `;
@@ -2892,6 +3088,34 @@
 
   // Initialize quality settings handlers
   document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('file-table').addEventListener('change', function(event) {
+      if (event.target.matches('.select-item')) {
+        event.target.closest('tr').classList.toggle('selected', event.target.checked);
+      }
+    });
+    // Delegated so it survives file-table re-renders. Names and paths are
+    // user-controlled text, so they travel as data attributes rather than
+    // being interpolated into inline onclick strings.
+    document.getElementById('file-table').addEventListener('click', function(e) {
+      const link = e.target.closest('.image-preview-link');
+      if (link) {
+        e.preventDefault();
+        openImagePreview(link.getAttribute('href'), link.textContent);
+        return;
+      }
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const name = btn.dataset.name;
+      const path = btn.dataset.path;
+      if (btn.dataset.action === 'move') {
+        openMoveModal(name, path);
+      } else if (btn.dataset.action === 'rename') {
+        openRenameModal(name, path);
+      } else if (btn.dataset.action === 'delete') {
+        openDeleteModal(name, path, btn.dataset.folder === 'true');
+      }
+    });
+
     const qualitySlider = document.getElementById('qualitySlider');
     const qualityInput = document.getElementById('qualityInput');
 
@@ -2906,7 +3130,12 @@
 
     if (qualitySlider && qualityInput) {
       // Initialize converter variables with UI default values
-      updateQualitySettings();
+      suppressUploadSettingsSave = true;
+      try {
+        updateQualitySettings();
+      } finally {
+        suppressUploadSettingsSave = false;
+      }
 
       // Deselect all presets when slider is manually changed
       const deselectPresets = function() {
@@ -2934,15 +3163,15 @@
   });
 
   function openFolderModal() {
-    document.getElementById('folderPathDisplay').textContent = currentPath === '/' ? '/ 🏠' : currentPath;
-    document.getElementById('folderModal').classList.add('open');
+    document.getElementById('folderPathDisplay').textContent = currentPath;
+    openWebModal('folderModal');
     document.getElementById('folderName').value = '';
     setTimeout(() => document.getElementById('folderName').focus(), 50);
     document.getElementById('folderName').onkeydown = (e) => { if (e.key === 'Enter' && e.target.value.trim()) createFolder(); };
   }
 
   function closeFolderModal() {
-    document.getElementById('folderModal').classList.remove('open');
+    closeWebModal('folderModal');
   }
 
   // Toggle select-all checkbox
@@ -2950,6 +3179,7 @@
     const checked = master.checked;
     document.querySelectorAll('.select-item').forEach(cb => {
       cb.checked = checked;
+      cb.closest('tr').classList.toggle('selected', checked);
     });
   }
 
@@ -2969,7 +3199,7 @@
   function openDeleteSelectedModal() {
     const items = getSelectedItems();
     if (items.length === 0) {
-      alert('Please select at least one item to delete.');
+      showWebAlert('Please select at least one item to delete.');
       return;
     }
     openDeleteModalForItems(items);
@@ -2989,14 +3219,14 @@
     items.forEach(it => {
       const div = document.createElement('div');
       div.style.marginBottom = '6px';
-      div.textContent = (it.isFolder ? '📁 ' : '📄 ') + it.path;
+      div.textContent = it.path;
       listEl.appendChild(div);
     });
-    document.getElementById('deleteModal').classList.add('open');
+    openWebModal('deleteModal');
   }
 
   function closeDeleteModal() {
-    document.getElementById('deleteModal').classList.remove('open');
+    closeWebModal('deleteModal');
   }
 
   function confirmDelete() {
@@ -3022,11 +3252,11 @@
         window.location.reload();
       } else {
         const text = await res.text();
-        alert('Failed to delete: ' + text);
+        showWebAlert('Failed to delete: ' + text);
         closeDeleteModal();
       }
     }).catch(() => {
-      alert('Failed to delete - network error');
+      showWebAlert('Failed to delete - network error');
       closeDeleteModal();
     });
   }
@@ -3139,15 +3369,13 @@
     const hasEpub = Array.from(files).some(f => f.name.toLowerCase().endsWith('.epub'));
     if (files.length > 0 && hasEpub) {
       convertOptions.style.display = 'block';
+      toggleConvertOptions();
     } else {
       convertOptions.style.display = 'none';
-      // Clear stale checkbox state so the "Optimize & Upload" button doesn't linger
-      // when the user re-picks a non-EPUB after having ticked Optimize for an EPUB.
-      const cb = document.getElementById('convertBeforeUpload');
-      if (cb && cb.checked) {
-        cb.checked = false;
-        toggleConvertOptions();
-      }
+      uploadBtn.textContent = 'Upload';
+      uploadBtn.classList.remove('optimize');
+      document.getElementById('convertInfo').style.display = 'none';
+      document.getElementById('convertWarning').style.display = 'none';
       if (files.length === 0) clearImagePicker();
     }
 
@@ -3187,7 +3415,10 @@ let operationCancelled = false; // Set by Cancel to stop conversion loops and up
 let uploadGeneration = 0;       // Incremented each uploadFile() call; guards stale restoreAfterCancel()
 let currentUploadWs = null;     // Active WebSocket reference for external abort
 let currentUploadXhr = null;    // Active XHR reference for external abort
-const WS_PORT = 81;
+// On-device HTTP uses port 80 and WebSocket uses 81. The simulator maps the
+// same adjacent-port contract to an unprivileged host pair such as 8080/8081.
+const HTTP_PORT = Number(window.location.port || 80);
+const WS_PORT = HTTP_PORT + 1;
 const WS_CHUNK_SIZE = 4096; // 4KB chunks - smaller for ESP32 stability
 
 // ============================================================================
@@ -3229,6 +3460,75 @@ let ENABLE_GRAYSCALE = DEFAULT_ENABLE_GRAYSCALE;
 let ENABLE_AUTO_CROP = DEFAULT_ENABLE_AUTO_CROP;
 let HANDEDNESS = 'right'; // 'right' = clockwise (right-handed), 'left' = counter-clockwise (left-handed)
 let OVERLAP_PERCENT = 5; // Minimum overlap percentage for splits (5%, 10%, 15%)
+const UPLOAD_SETTINGS_STORAGE_KEY = 'crosspoint.files.uploadSettings.v1';
+const DEFAULT_UPLOAD_SETTINGS = Object.freeze({
+  convertBeforeUpload: false,
+  renameFromMetadata: false,
+  quality: DEFAULT_JPEG_QUALITY,
+  autoCrop: DEFAULT_ENABLE_AUTO_CROP,
+  deviceTarget: 'auto',
+  handedness: 'right',
+  overlap: 5,
+  exportLog: false
+});
+let suppressUploadSettingsSave = false;
+
+function getCurrentUploadSettings() {
+  return {
+    convertBeforeUpload: !!document.getElementById('convertBeforeUpload')?.checked,
+    renameFromMetadata: !!document.getElementById('renameFromMetadataToggle')?.checked,
+    quality: parseInt(document.getElementById('qualitySlider')?.value || JPEG_QUALITY, 10),
+    autoCrop: !!document.getElementById('autoCropToggle')?.checked,
+    deviceTarget: DEVICE_TARGET,
+    handedness: HANDEDNESS,
+    overlap: OVERLAP_PERCENT,
+    exportLog: !!document.getElementById('export-log-checkbox')?.checked
+  };
+}
+
+function applyUploadSettings(settings = {}) {
+  const merged = { ...DEFAULT_UPLOAD_SETTINGS, ...settings };
+  suppressUploadSettingsSave = true;
+  try {
+    document.getElementById('convertBeforeUpload').checked = !!merged.convertBeforeUpload;
+    document.getElementById('renameFromMetadataToggle').checked = !!merged.renameFromMetadata;
+    document.getElementById('autoCropToggle').checked = !!merged.autoCrop;
+    document.getElementById('export-log-checkbox').checked = !!merged.exportLog;
+    document.getElementById('rememberUploadSettings').checked = !!settings.rememberSettings;
+
+    setQualityPreset(Math.max(1, Math.min(95, parseInt(merged.quality, 10) || DEFAULT_JPEG_QUALITY)));
+    setDeviceTarget(['auto', 'X3', 'X4'].includes(merged.deviceTarget) ? merged.deviceTarget : 'auto');
+    setHandedness(merged.handedness === 'left' ? 'left' : 'right');
+    setOverlap([5, 10, 15].includes(Number(merged.overlap)) ? Number(merged.overlap) : 5);
+    toggleConvertOptions();
+  } finally {
+    suppressUploadSettingsSave = false;
+  }
+}
+
+function restoreUploadSettingsFromStorage() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(UPLOAD_SETTINGS_STORAGE_KEY) || 'null');
+    applyUploadSettings(saved?.rememberSettings ? saved : undefined);
+  } catch (e) {
+    console.warn('Could not read remembered upload settings:', e);
+    applyUploadSettings();
+  }
+}
+
+function updateUploadSettingsPersistence() {
+  if (suppressUploadSettingsSave) return;
+  try {
+    if (!document.getElementById('rememberUploadSettings')?.checked) {
+      localStorage.removeItem(UPLOAD_SETTINGS_STORAGE_KEY);
+      return;
+    }
+    const settings = { ...getCurrentUploadSettings(), rememberSettings: true };
+    localStorage.setItem(UPLOAD_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch (e) {
+    console.warn('Could not save upload settings:', e);
+  }
+}
 
 // ============================================================================
 // Image Picker State Management
@@ -3279,7 +3579,7 @@ function applyDeviceTarget() {
 
   const summary = document.getElementById('convertSizeSummary');
   if (summary) {
-    summary.textContent = `📏 Max ${profile.width}×${profile.height}px`;
+    summary.textContent = `Max ${profile.width}×${profile.height}px`;
   }
   document.querySelectorAll('.device-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.value === DEVICE_TARGET);
@@ -3306,6 +3606,7 @@ function applyDeviceTarget() {
 function setDeviceTarget(value) {
   DEVICE_TARGET = value;
   applyDeviceTarget();
+  updateUploadSettingsPersistence();
 }
 
 // Batch logging system for multiple files
@@ -3370,7 +3671,7 @@ function logImage(name, origW, origH, origFormat, origSize, newW, newH, newSize,
 
   // Get state label and color
   const stateLabels = ['', 'H-Split', 'V-Split', 'Rotate'];
-  const stateColors = ['', '#3498db', '#e74c3c', '#9b59b6'];
+  const stateColors = ['', 'var(--info-color)', 'var(--danger-color)', 'var(--secondary-color)'];
   const stateLabel = stateLabels[imageState] || '';
   const stateColor = stateColors[imageState] || '';
 
@@ -3385,7 +3686,7 @@ function logImage(name, origW, origH, origFormat, origSize, newW, newH, newSize,
         `${baseName}${p.suffix}.jpg (${p.width}×${p.height}, ${formatBytes(p.size)})`
       ).join(', ');
     }
-    const savedInfo = saved > 0 ? `, <span style="color:#27ae60">-${savedPct}%</span>` : '';
+    const savedInfo = saved > 0 ? `, <span style="color:var(--success-color)">-${savedPct}%</span>` : '';
     const stateIndicator = imageState > 0 ? ` <span style="color:${stateColor};font-weight:600;">[${stateLabel}]</span>` : '';
     log(`<strong>${escapeHtml(name)}</strong>${stateIndicator} <span class="log-detail">(${dims} ${origFormat.toUpperCase()}, ${formatBytes(origSize)}) → ${splitCount} parts${savedInfo}</span>`, '', 'SPLIT');
     if (partsDetail) {
@@ -3395,7 +3696,7 @@ function logImage(name, origW, origH, origFormat, origSize, newW, newH, newSize,
     conversionStats.images++;
     const stateIndicator = imageState > 0 ? ` <span style="color:${stateColor};font-weight:600;">[${stateLabel}]</span>` : '';
     const detail = saved > 0
-      ? `<span class="log-detail">(${dims} → ${newDims}, ${formatBytes(origSize)} → ${formatBytes(newSize)}, <span style="color:#27ae60">-${savedPct}%</span>)</span>`
+      ? `<span class="log-detail">(${dims} → ${newDims}, ${formatBytes(origSize)} → ${formatBytes(newSize)}, <span style="color:var(--success-color)">-${savedPct}%</span>)</span>`
       : `<span class="log-detail">(${dims} → ${newDims}, ${formatBytes(newSize)})</span>`;
     log(`<strong>${escapeHtml(name)}</strong>${stateIndicator} ${detail}`, '', 'CONVERT');
   }
@@ -3428,12 +3729,12 @@ function logSummary(originalSize, newSize, timeElapsed) {
 
   const summaryHtml = `
     <div class="log-summary">
-      <div class="log-summary-title">📊 Conversion Summary</div>
+      <div class="log-summary-title">Conversion Summary</div>
       <table class="log-summary-table">
         <tr><td>Images found</td><td class="highlight">${totalImages}</td></tr>
         <tr><td>Images processed</td><td>${totalOutput}${conversionStats.splitParts > conversionStats.splits ? ` (+${conversionStats.splitParts - conversionStats.splits} from splits)` : ''}</td></tr>
         <tr><td>EPUB repairs</td><td>${conversionStats.fixes > 0 ? conversionStats.fixes + ' fixes applied' : 'None needed'}</td></tr>
-        ${conversionStats.errors > 0 ? `<tr><td>Errors</td><td style="color:#e74c3c">${conversionStats.errors}</td></tr>` : ''}
+        ${conversionStats.errors > 0 ? `<tr><td>Errors</td><td style="color:var(--danger-color)">${conversionStats.errors}</td></tr>` : ''}
         <tr><td>Original size</td><td>${formatBytes(originalSize)}</td></tr>
         <tr><td>Optimized size</td><td>${formatBytes(newSize)}</td></tr>
         <tr><td>Saved</td><td class="${saved > 0 ? 'saved' : 'increased'}">${saved > 0 ? formatBytes(saved) + ' (' + savedPct + '%)' : '+' + formatBytes(-saved)}</td></tr>
@@ -3513,7 +3814,7 @@ function finalizeBatchLog() {
     fileHeader.style.marginTop = index > 0 ? '15px' : '5px';
     fileHeader.style.borderTop = index > 0 ? '1px solid var(--border-color)' : 'none';
     fileHeader.style.paddingTop = index > 0 ? '10px' : '0';
-    fileHeader.innerHTML = `<span class="log-timestamp"></span><span class="log-message"><strong>${escapeHtml(fileLog.fileName)}</strong> — ${fileLog.succeeded ? '<span style="color:#27ae60">✓ Success</span>' : '<span style="color:#e74c3c">✗ Failed</span>'}</span>`;
+    fileHeader.innerHTML = `<span class="log-timestamp"></span><span class="log-message"><strong>${escapeHtml(fileLog.fileName)}</strong> — ${fileLog.succeeded ? '<span style="color:var(--success-color)">✓ Success</span>' : '<span style="color:var(--danger-color)">✗ Failed</span>'}</span>`;
     logContainer.appendChild(fileHeader);
 
     fileLog.entries.forEach(entry => {
@@ -3541,15 +3842,15 @@ function finalizeBatchLog() {
   // Add batch summary
   const batchSummaryHtml = `
     <div class="log-summary">
-      <div class="log-summary-title">📊 Batch Conversion Summary</div>
+      <div class="log-summary-title">Batch Conversion Summary</div>
       <table class="log-summary-table">
         <tr><td>Files processed</td><td class="highlight">${batchStats.filesProcessed}</td></tr>
-        <tr><td>Successful</td><td style="color:#27ae60">${batchStats.filesSucceeded}</td></tr>
+        <tr><td>Successful</td><td style="color:var(--success-color)">${batchStats.filesSucceeded}</td></tr>
         <tr><td>Failed</td><td style="${batchStats.filesFailed > 0 ? '#e74c3c' : '#7f8c8d'}">${batchStats.filesFailed}</td></tr>
         <tr><td>Total images processed</td><td>${batchStats.totalImages}</td></tr>
         <tr><td>Total splits</td><td>${batchStats.totalSplits}</td></tr>
         <tr><td>Total fixes applied</td><td>${batchStats.totalFixes}</td></tr>
-        ${batchStats.totalErrors > 0 ? `<tr><td>Total errors</td><td style="color:#e74c3c">${batchStats.totalErrors}</td></tr>` : ''}${sizeRowsHtml}
+        ${batchStats.totalErrors > 0 ? `<tr><td>Total errors</td><td style="color:var(--danger-color)">${batchStats.totalErrors}</td></tr>` : ''}${sizeRowsHtml}
         <tr><td>Total time</td><td>${batchTime.toFixed(1)}s</td></tr>
       </table>
     </div>
@@ -3714,6 +4015,111 @@ async function findOPFPath(zip) {
   return fallback;
 }
 
+function sanitizeMetadataFilenamePart(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return (text.normalize ? text.normalize('NFC') : text)
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[. ]+/g, '')
+    .replace(/[. ]+$/g, '')
+    .trim();
+}
+
+function buildMetadataFilename(title, author) {
+  title = sanitizeMetadataFilenamePart(title);
+  author = sanitizeMetadataFilenamePart(author);
+  if (!title) return '';
+  let base = author ? `${title} - ${author}` : title;
+  if (base.length > 180) base = base.substring(0, 180).replace(/\s+\S*$/g, '').trim() || base.substring(0, 180).trim();
+  return `${base}.epub`;
+}
+
+async function getMetadataFilenameForEpub(file) {
+  if (typeof JSZip === 'undefined') return '';
+  const zip = await JSZip.loadAsync(file);
+  const opfPath = await findOPFPath(zip);
+  if (!opfPath || !zip.files[opfPath]) return '';
+
+  const doc = new DOMParser().parseFromString(await safeReadText(zip.files[opfPath]), 'application/xml');
+  if (doc.querySelector('parsererror')) return '';
+
+  const title = doc.getElementsByTagNameNS('*', 'title')[0]?.textContent || '';
+  const creators = Array.from(doc.getElementsByTagNameNS('*', 'creator'));
+  const getCreatorRole = el => (
+    el.getAttribute('role') ||
+    el.getAttribute('opf:role') ||
+    el.getAttributeNS('http://www.idpf.org/2007/opf', 'role') ||
+    ''
+  ).toLowerCase();
+  const authorEl = creators.find(el => getCreatorRole(el) === 'aut') ||
+                   creators.find(el => !getCreatorRole(el));
+  const authorText = authorEl?.textContent?.trim();
+  const author = authorText ||
+                 authorEl?.getAttribute('file-as') ||
+                 authorEl?.getAttribute('opf:file-as') ||
+                 authorEl?.getAttributeNS('http://www.idpf.org/2007/opf', 'file-as') ||
+                 '';
+  return buildMetadataFilename(title, author);
+}
+
+async function maybeRenameEbookFile(file) {
+  const renameToggle = document.getElementById('renameFromMetadataToggle');
+  if (!renameToggle || !renameToggle.checked || !file.name.toLowerCase().endsWith('.epub')) {
+    return file;
+  }
+
+  try {
+    const metadataName = await getMetadataFilenameForEpub(file);
+    if (!metadataName || metadataName === file.name) return file;
+    return new File([file], metadataName, {
+      type: file.type || 'application/epub+zip',
+      lastModified: file.lastModified
+    });
+  } catch (e) {
+    console.warn('Could not rename EPUB from metadata:', e);
+    return file;
+  }
+}
+
+function reserveAvailableUploadFilename(fileName, usedFileNames) {
+  // Use NFC filenames for cross-platform SD card compatibility.
+  const normalizedName = fileName.normalize('NFC');
+  if (normalizedName !== fileName) {
+    console.log(`[Upload] Normalized filename to NFC: ${fileName} -> ${normalizedName}`);
+    fileName = normalizedName;
+  }
+  const normalize = name => name.normalize('NFC').toLowerCase();
+  if (!usedFileNames.has(normalize(fileName))) {
+    usedFileNames.add(normalize(fileName));
+    return fileName;
+  }
+
+  const dotIndex = fileName.lastIndexOf('.');
+  const extensionIndex = dotIndex > 0 ? dotIndex : fileName.length;
+  const baseName = fileName.substring(0, extensionIndex);
+  const extension = fileName.substring(extensionIndex);
+  let nextSuffix = 2;
+
+  let candidateName;
+  do {
+    candidateName = `${baseName} (${nextSuffix})${extension}`;
+    nextSuffix++;
+  } while (usedFileNames.has(normalize(candidateName)));
+
+  usedFileNames.add(normalize(candidateName));
+  console.log(`[Upload] Renamed to avoid collision: ${fileName} -> ${candidateName}`);
+  return candidateName;
+}
+
+async function fetchExistingUploadNames() {
+  const response = await fetch('/api/files?path=' + encodeURIComponent(currentPath) + '&_=' + Date.now());
+  if (!response.ok) {
+    throw new Error(response.status + ' ' + response.statusText);
+  }
+  const entries = await response.json();
+  return new Set(entries.map(entry => entry.name.normalize('NFC').toLowerCase()));
+}
+
 /**
  * Resolve a relative href against a base file path.
  * Handles multiple ../, ./, absolute /, and bare relative paths.
@@ -3730,6 +4136,64 @@ function resolvePath(basePath, href) {
   }
   const resolved = [...baseParts, ...hrefParts].join('/');
   return resolved.replace(/\/+/g, '/');
+}
+
+/** Remove XML comments from XHTML source text. Returns {text, count, bytes}. */
+function stripComments(xml) {
+  const SKIPPED = [
+    { open: '<![CDATA[', close: ']]>' },
+    { open: '<?', close: '?>' },
+  ];
+
+  const encoder = new TextEncoder();
+  const out = [];
+  let i = 0;
+  let count = 0;
+  let bytes = 0;
+
+  const doctypeEnd = (from) => {
+    const gt = xml.indexOf('>', from);
+    const subset = xml.indexOf('[', from);
+    if (subset < 0 || (gt >= 0 && subset > gt)) return gt < 0 ? xml.length : gt + 1;
+    const close = xml.indexOf(']>', subset);
+    return close < 0 ? xml.length : close + 2;
+  };
+
+  while (i < xml.length) {
+    const next = xml.indexOf('<', i);
+    if (next < 0) { out.push(xml.slice(i)); break; }
+    if (next > i) out.push(xml.slice(i, next));
+
+    if (xml.startsWith('<!--', next)) {
+      const close = xml.indexOf('-->', next + 4);
+      const end = close < 0 ? xml.length : close + 3;
+      count++;
+      bytes += encoder.encode(xml.slice(next, end)).length;
+      i = end;
+      continue;
+    }
+
+    if (xml.startsWith('<!DOCTYPE', next)) {
+      const end = doctypeEnd(next + 9);
+      out.push(xml.slice(next, end));
+      i = end;
+      continue;
+    }
+
+    const skipped = SKIPPED.find(s => xml.startsWith(s.open, next));
+    if (skipped) {
+      const close = xml.indexOf(skipped.close, next + skipped.open.length);
+      const end = close < 0 ? xml.length : close + skipped.close.length;
+      out.push(xml.slice(next, end));
+      i = end;
+      continue;
+    }
+
+    out.push('<');
+    i = next + 1;
+  }
+
+  return { text: out.join(''), count, bytes };
 }
 
 /**
@@ -3808,12 +4272,79 @@ function syncNCXIdentifier(ncxText, mainIdentifier) {
   return t;
 }
 
+// ===== Embedded font removal =====
+// CrossPoint renders with built-in / SD-card fonts and never loads fonts
+// embedded in an EPUB, so they are dead weight (often 100KB-2MB per book).
+const FONT_EXT_REGEX = /\.(ttf|otf|woff2?|eot)$/;
+const FONT_MEDIA_TYPE_REGEX = /^(font\/|application\/font-|application\/x-font-|application\/vnd\.ms-(opentype|fontobject)$)/i;
+
+// Returns a Set of zip-root-relative paths of embedded font files, detected by
+// file extension and by OPF manifest media-type (catches odd extensions).
+function collectFontPaths(zip, opfContent, opfPath) {
+  const fontPaths = new Set();
+  zip.forEach(p => { if (FONT_EXT_REGEX.test(p.toLowerCase())) fontPaths.add(p); });
+
+  if (opfContent && opfPath) {
+    try {
+      const doc = new DOMParser().parseFromString(opfContent, 'application/xml');
+      if (!doc.querySelector('parsererror')) {
+        for (const item of [...doc.getElementsByTagNameNS('*', 'item')]) {
+          const type = item.getAttribute('media-type') || '';
+          const href = item.getAttribute('href') || '';
+          if (href && FONT_MEDIA_TYPE_REGEX.test(type)) {
+            const resolved = resolvePath(opfPath, decodeHref(href));
+            if (zip.files[resolved]) fontPaths.add(resolved);
+          }
+        }
+      }
+    } catch (e) {
+      // Extension-based detection already covers the common cases
+    }
+  }
+  return fontPaths;
+}
+
+// Strips all @font-face rules from CSS. Rules can also embed fonts directly as
+// multi-hundred-KB data: URIs, so this is a size win even without font files.
+function stripFontFaceRules(css) {
+  let count = 0;
+  const stripped = css.replace(/@font-face(?:\s|\/\*[\s\S]*?\*\/)*\{[^{}]*\}/gi, () => { count++; return ''; });
+  return { css: stripped, count };
+}
+
+// Removes font-obfuscation <EncryptedData> entries from META-INF/encryption.xml.
+// Returns { dropFile: true } when nothing meaningful remains, { modified, xml }
+// when some entries were removed, or { modified: false } to keep the file as-is.
+function stripFontEncryptionEntries(xmlText, fontPaths) {
+  try {
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    if (doc.querySelector('parsererror')) return { modified: false };
+    const entries = [...doc.getElementsByTagNameNS('*', 'EncryptedData')];
+    let removed = 0;
+    for (const entry of entries) {
+      const ref = entry.getElementsByTagNameNS('*', 'CipherReference')[0];
+      const uri = ref ? decodeHref(ref.getAttribute('URI') || '') : '';
+      if (fontPaths.has(uri.replace(/^\//, ''))) {
+        entry.parentNode.removeChild(entry);
+        removed++;
+      }
+    }
+    if (!removed) return { modified: false };
+    const remaining = doc.getElementsByTagNameNS('*', 'EncryptedData').length +
+                      doc.getElementsByTagNameNS('*', 'EncryptedKey').length;
+    if (remaining === 0) return { dropFile: true };
+    return { modified: true, xml: safeSerialize(doc, xmlText) };
+  } catch (e) {
+    return { modified: false };
+  }
+}
+
 /**
  * Fix OPF content: fix media-types, strip svg properties,
- * update split image manifest entries, ensure cover meta.
- * DOMParser with regex fallback.
+ * update split image manifest entries, remove stripped font
+ * entries, ensure cover meta. DOMParser with regex fallback.
  */
-function fixOPF(opfText, opfOriginal, opfDir, splitImages = {}) {
+function fixOPF(opfText, opfOriginal, opfDir, splitImages = {}, fontPaths = null) {
   let t = opfText;
 
   try {
@@ -3840,6 +4371,15 @@ function fixOPF(opfText, opfOriginal, opfDir, splitImages = {}) {
         const newProps = props.split(/\s+/).filter(p => p !== 'svg').join(' ').trim();
         if (newProps) item.setAttribute('properties', newProps);
         else item.removeAttribute('properties');
+      }
+    }
+
+    // Remove manifest entries for stripped embedded fonts
+    if (fontPaths && fontPaths.size) {
+      for (const item of items) {
+        const href = decodeHref(item.getAttribute('href') || '');
+        const full = resolvePath((opfDir ? opfDir + '/' : '') + 'x', href);
+        if (fontPaths.has(full)) item.parentNode.removeChild(item);
       }
     }
 
@@ -3878,6 +4418,13 @@ function fixOPF(opfText, opfOriginal, opfDir, splitImages = {}) {
     t = t.replace(/(<(?:\w+:)?item\b[^>]*href="[^"]+\.jpg"[^>]*)media-type="image\/(png|gif|webp|bmp)"/g, '$1media-type="image/jpeg"');
     t = t.replace(/(<(?:\w+:)?item\b[^>]*)media-type="image\/(png|gif|webp|bmp)"([^>]*href="[^"]+\.jpg")/g, '$1media-type="image/jpeg"$3');
     t = t.replace(/\s+svg(?=["'\s>])/g, '');
+    if (fontPaths && fontPaths.size) {
+      for (const p of fontPaths) {
+        const href = opfDir && p.startsWith(opfDir + '/') ? p.substring(opfDir.length + 1) : p;
+        const itemRegex = new RegExp(`<(?:\\w+:)?item\\b[^>]*href=["']${escapeRegex(href)}["'][^>]*\\/?>\\s*`, 'gi');
+        t = t.replace(itemRegex, '');
+      }
+    }
     for (const [splitKey, splitInfo] of Object.entries(splitImages)) {
       const parts = splitInfo.parts || splitInfo;
       let origHref = opfDir && splitKey.startsWith(opfDir + '/') ? splitKey.substring(opfDir.length + 1) : splitKey;
@@ -4762,10 +5309,26 @@ async function convertEpubFile(file, progressCallback) {
     if (progressCallback) progressCallback((i / entries.length) * 60);
   }
 
+  // Embedded fonts are dropped entirely — CrossPoint never renders with them.
+  // Counters cover font files, @font-face rules (incl. data: URI fonts), and
+  // encryption.xml shrinkage; they count uncompressed content bytes removed
+  // (the final archive-size delta is reported separately by logSummary).
+  const fontPaths = collectFontPaths(zip, opfContent, opfPath);
+  let removedFontCount = 0;
+  let removedFontBytes = 0;
+  let removedFontFaceRules = 0;
+
   // Second pass: update XHTML using DOMParser
   for (const [xhtmlPath, content] of Object.entries(xhtmlFiles)) {
     if (operationCancelled) throw new Error('Cancelled by user');
     let t = content;
+
+    const stripped = stripComments(t);
+    if (stripped.count) {
+      t = stripped.text;
+      logFix(`Comments (${stripped.count}, ${formatBytes(stripped.bytes)})`, xhtmlPath.split('/').pop());
+    }
+
     const r = fixSvgCover(t);
     if (r.fixed) { t = r.c; logFix('SVG cover', xhtmlPath.split('/').pop()); }
 
@@ -4913,6 +5476,17 @@ async function convertEpubFile(file, progressCallback) {
       console.warn('DOMParser error for', xhtmlPath, e.message);
     }
 
+    // Strip @font-face rules from inline <style> blocks — embedded font files
+    // are removed, so leftover rules would reference missing resources
+    t = t.replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, open, css, close) => {
+      const ff = stripFontFaceRules(css);
+      if (!ff.count) return m;
+      removedFontFaceRules += ff.count;
+      removedFontBytes += new TextEncoder().encode(css).length - new TextEncoder().encode(ff.css).length;
+      logFix('@font-face', `${ff.count} rule(s) removed from ${escapeHtml(xhtmlPath.split('/').pop())}`);
+      return open + ff.css + close;
+    });
+
     // Inject universal image constraint — prevents overflow on e-ink displays
     if (t.includes('</head>')) {
       t = t.replace('</head>', DEFENSIVE_STYLE + '</head>');
@@ -4933,7 +5507,7 @@ async function convertEpubFile(file, progressCallback) {
       t = t.split(o.split('/').pop()).join(n.split('/').pop());
     }
     const opfDir = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/')) : '';
-    t = fixOPF(t, opfContent, opfDir, splitImages);
+    t = fixOPF(t, opfContent, opfDir, splitImages, fontPaths);
     if (t !== opfContent) logFix('OPF', 'manifest updated');
     out.file(opfPath, t, { compression: 'DEFLATE', compressionOptions: { level: 8 }, createFolders: false });
   }
@@ -4945,13 +5519,42 @@ async function convertEpubFile(file, progressCallback) {
     const low = path.toLowerCase();
     if (low.match(/\.(png|gif|webp|bmp|jpg|jpeg)$/) || low.match(/\.(xhtml|html|htm)$/) || low.endsWith('.opf')) continue;
 
+    if (fontPaths.has(path)) {
+      const fontData = await fileObj.async('arraybuffer');
+      removedFontCount++;
+      removedFontBytes += fontData.byteLength;
+      log(`${escapeHtml(path.split('/').pop())} <span class="log-detail">(${formatBytes(fontData.byteLength)})</span>`, 'success', 'REMOVE');
+      continue;
+    }
+
     let data = await fileObj.async('arraybuffer');
     if (low.endsWith('.css')) {
       let t = await safeReadText(fileObj);
       for (const [o, n] of Object.entries(renamed)) {
         t = t.split(o.split('/').pop()).join(n.split('/').pop());
       }
+      const ff = stripFontFaceRules(t);
+      if (ff.count) {
+        removedFontFaceRules += ff.count;
+        removedFontBytes += new TextEncoder().encode(t).length - new TextEncoder().encode(ff.css).length;
+        t = ff.css;
+        logFix('@font-face', `${ff.count} rule(s) removed from ${escapeHtml(path.split('/').pop())}`);
+      }
       data = new TextEncoder().encode(t);
+    } else if (path === 'META-INF/encryption.xml' && fontPaths.size) {
+      const t = await safeReadText(fileObj);
+      const enc = stripFontEncryptionEntries(t, fontPaths);
+      if (enc.dropFile) {
+        removedFontBytes += data.byteLength;
+        logFix('encryption.xml', 'removed (contained only font obfuscation entries)');
+        continue;
+      }
+      if (enc.modified) {
+        const encoded = new TextEncoder().encode(enc.xml);
+        removedFontBytes += Math.max(0, data.byteLength - encoded.length);
+        data = encoded;
+        logFix('encryption.xml', 'font obfuscation entries removed');
+      }
     } else if (low.endsWith('.ncx')) {
       let t = await safeReadText(fileObj);
       for (const [o, n] of Object.entries(renamed)) {
@@ -4963,6 +5566,10 @@ async function convertEpubFile(file, progressCallback) {
       data = new TextEncoder().encode(t);
     }
     out.file(path, data, { compression: 'DEFLATE', compressionOptions: { level: 8 }, createFolders: false });
+  }
+
+  if (removedFontCount > 0 || removedFontFaceRules > 0) {
+    log(`Removed ${removedFontCount} embedded font(s) and ${removedFontFaceRules} @font-face rule(s), ${formatBytes(removedFontBytes)} of font data`, '', 'INFO');
   }
 
   if (progressCallback) progressCallback(100);
@@ -5145,7 +5752,7 @@ function uploadFileHTTP(file, onProgress, onComplete, onError) {
   });
 }
 
-function uploadFile() {
+async function uploadFile() {
   if (isUploadInProgress) return;
 
   const fileInput = document.getElementById('fileInput');
@@ -5153,12 +5760,21 @@ function uploadFile() {
   const convertEnabled = document.getElementById('convertBeforeUpload').checked;
 
   if (files.length === 0) {
-    alert('Please select at least one file!');
+    showWebAlert('Please select at least one file!');
+    return;
+  }
+
+  isUploadInProgress = true;
+  let usedFileNames;
+  try {
+    usedFileNames = await fetchExistingUploadNames();
+  } catch (error) {
+    isUploadInProgress = false;
+    showWebAlert('Failed to check existing files: ' + error.message);
     return;
   }
 
   // Prevent modal close during upload
-  isUploadInProgress = true;
   uploadGeneration++;
   const myGeneration = uploadGeneration;
   document.getElementById('uploadModalClose').classList.add('disabled');
@@ -5190,7 +5806,7 @@ function uploadFile() {
     if (currentIndex >= files.length) {
       // All files processed - show summary
       if (failedFiles.length === 0) {
-        progressFill.style.backgroundColor = '#4caf50';
+        progressFill.style.backgroundColor = 'var(--success-color)';
         progressText.textContent = 'All uploads complete!';
 
         // Finalize batch log if in batch mode
@@ -5205,7 +5821,7 @@ function uploadFile() {
           }, 1000);
         }
       } else {
-        progressFill.style.backgroundColor = '#e74c3c';
+        progressFill.style.backgroundColor = 'var(--danger-color)';
         const failedList = failedFiles.map(f => f.name).join(', ');
         progressText.textContent = `${files.length - failedFiles.length}/${files.length} uploaded. Failed: ${failedList}`;
 
@@ -5237,7 +5853,7 @@ function uploadFile() {
     // Reset progress bar instantly without transition when starting a new file
     progressFill.classList.add('no-transition');
     progressFill.style.width = '0%';
-    progressFill.style.backgroundColor = '#27ae60';
+    progressFill.style.backgroundColor = 'var(--success-color)';
     // Re-enable transition after a brief delay
     setTimeout(() => progressFill.classList.remove('no-transition'), 50);
 
@@ -5248,6 +5864,24 @@ function uploadFile() {
     let conversionFailed = false;  // Track if conversion actually failed
     let convOriginalSize = 0;      // Picked-file size; 0 unless conversion succeeded
     let convNewSize = 0;           // Generated blob size; 0 unless conversion succeeded
+
+    if (isEpub && document.getElementById('renameFromMetadataToggle').checked) {
+      const originalName = file.name;
+      progressText.style.color = '';
+      progressText.textContent = `Reading metadata for ${file.name} (${currentIndex + 1}/${files.length})...`;
+      file = await maybeRenameEbookFile(file);
+      if (file.name !== originalName) {
+        console.log(`[Upload] Renamed from metadata: ${originalName} -> ${file.name}`);
+      }
+    }
+
+    const availableName = reserveAvailableUploadFilename(file.name, usedFileNames);
+    if (availableName !== file.name) {
+      file = new File([file], availableName, {
+        type: file.type,
+        lastModified: file.lastModified
+      });
+    }
 
     const methodText = useWebSocket ? ' [WS]' : ' [HTTP]';
     const stageText = needsConversion ? 'Converting & uploading' : 'Uploading';
@@ -5317,7 +5951,7 @@ function uploadFile() {
     try {
       // Convert EPUB if needed
       if (needsConversion) {
-        progressFill.style.backgroundColor = '#9b59b6'; // Purple for conversion
+        progressFill.style.backgroundColor = 'var(--secondary-color)'; // Purple for conversion
         progressText.textContent = `Converting ${file.name} (${currentIndex + 1}/${files.length})...`;
 
         // Clear log for single file mode, or just add separator for batch mode
@@ -5338,7 +5972,7 @@ function uploadFile() {
 
           // Create new File from converted blob
           file = new File([convertedBlob], file.name, { type: 'application/epub+zip' });
-          progressFill.style.backgroundColor = '#27ae60'; // Back to green for upload
+          progressFill.style.backgroundColor = 'var(--success-color)'; // Back to green for upload
           conversionSucceeded = true;
           convOriginalSize = origFileSize;
           convNewSize = convertedBlob.size;
@@ -5359,7 +5993,7 @@ function uploadFile() {
 
           // If conversion fails, try uploading original file
           progressText.textContent = `Conversion failed, uploading original ${file.name}...`;
-          progressFill.style.backgroundColor = '#e67e22'; // Orange for fallback
+          progressFill.style.backgroundColor = 'var(--warning-color)'; // Orange for fallback
           // Reset progress bar to 0% for original file upload
           progressFill.style.width = '0%';
         }
@@ -5413,7 +6047,7 @@ function showFailedUploadsBanner() {
     item.className = 'failed-file-item';
     item.innerHTML = `
       <div class="failed-file-info">
-        <div class="failed-file-name">📄 ${escapeHtml(failedFile.name)}</div>
+        <div class="failed-file-name">${fileIcon('file')} ${escapeHtml(failedFile.name)}</div>
         <div class="failed-file-error">Error: ${escapeHtml(failedFile.error)}</div>
       </div>
       <button class="retry-btn" onclick="retrySingleUpload(${index})">Retry</button>
@@ -5483,14 +6117,14 @@ function retryAllFailedUploads() {
     const folderName = document.getElementById('folderName').value.trim();
 
     if (!folderName) {
-      alert('Please enter a folder name!');
+      showWebAlert('Please enter a folder name!');
       return;
     }
 
     // Validate folder name
     const validName = /^(?!\.{1,2}$)[^"*:<>?\/\\|]+$/.test(folderName);
     if (!validName) {
-      alert('Folder name cannot contain \" * : < > ? / \\ | and must not be . or ..');
+      showWebAlert('Folder name cannot contain \" * : < > ? / \\ | and must not be . or ..');
       return;
     }
 
@@ -5505,12 +6139,12 @@ function retryAllFailedUploads() {
       if (xhr.status === 200) {
         window.location.reload();
       } else {
-        alert('Failed to create folder: ' + xhr.responseText);
+        showWebAlert('Failed to create folder: ' + xhr.responseText);
       }
     };
 
     xhr.onerror = function() {
-      alert('Failed to create folder - network error');
+      showWebAlert('Failed to create folder - network error');
     };
 
     xhr.send(formData);
@@ -5518,10 +6152,10 @@ function retryAllFailedUploads() {
 
   // Rename functions
   function openRenameModal(name, path) {
-    document.getElementById('renameItemName').textContent = '📄 ' + name;
+    document.getElementById('renameItemName').textContent = name;
     document.getElementById('renameItemPath').value = path;
     document.getElementById('renameNewName').value = name;
-    document.getElementById('renameModal').classList.add('open');
+    openWebModal('renameModal');
     setTimeout(() => {
       const input = document.getElementById('renameNewName');
       input.focus();
@@ -5530,7 +6164,7 @@ function retryAllFailedUploads() {
   }
 
   function closeRenameModal() {
-    document.getElementById('renameModal').classList.remove('open');
+    closeWebModal('renameModal');
   }
 
   function confirmRename() {
@@ -5538,11 +6172,11 @@ function retryAllFailedUploads() {
     const newName = document.getElementById('renameNewName').value.trim();
 
     if (!newName) {
-      alert('Please enter a new name.');
+      showWebAlert('Please enter a new name.');
       return;
     }
     if (newName.includes('/') || newName.includes('\\')) {
-      alert('File name cannot include slashes.');
+      showWebAlert('File name cannot include slashes.');
       return;
     }
 
@@ -5557,13 +6191,13 @@ function retryAllFailedUploads() {
       if (xhr.status === 200) {
         window.location.reload();
       } else {
-        alert('Failed to rename: ' + xhr.responseText);
+        showWebAlert('Failed to rename: ' + xhr.responseText);
       }
       closeRenameModal();
     };
 
     xhr.onerror = function() {
-      alert('Failed to rename - network error');
+      showWebAlert('Failed to rename - network error');
       closeRenameModal();
     };
 
@@ -5633,10 +6267,10 @@ function retryAllFailedUploads() {
   }
 
   function openMoveModal(name, path) {
-    document.getElementById('moveItemName').textContent = '📄 ' + name;
+    document.getElementById('moveItemName').textContent = name;
     document.getElementById('moveItemPath').value = path;
     document.getElementById('moveDestPath').value = currentPath === '/' ? '/' : currentPath;
-    document.getElementById('moveModal').classList.add('open');
+    openWebModal('moveModal');
     loadMoveFolderOptions();
     setTimeout(() => {
       document.getElementById('moveDestPath').focus();
@@ -5644,7 +6278,7 @@ function retryAllFailedUploads() {
   }
 
   function closeMoveModal() {
-    document.getElementById('moveModal').classList.remove('open');
+    closeWebModal('moveModal');
   }
 
   function confirmMove() {
@@ -5652,7 +6286,7 @@ function retryAllFailedUploads() {
     const destPath = normalizePath(document.getElementById('moveDestPath').value);
 
     if (!destPath) {
-      alert('Please enter a destination folder.');
+      showWebAlert('Please enter a destination folder.');
       return;
     }
 
@@ -5667,18 +6301,19 @@ function retryAllFailedUploads() {
       if (xhr.status === 200) {
         window.location.reload();
       } else {
-        alert('Failed to move: ' + xhr.responseText);
+        showWebAlert('Failed to move: ' + xhr.responseText);
       }
       closeMoveModal();
     };
 
     xhr.onerror = function() {
-      alert('Failed to move - network error');
+      showWebAlert('Failed to move - network error');
       closeMoveModal();
     };
 
     xhr.send(formData);
   }
+<!--#include file="shared/PluginHost.js.inc" -->
   hydrate();
 </script>
 </body>
