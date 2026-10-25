@@ -66,7 +66,7 @@ bool Epub::findContentOpfFile(std::string* contentOpfFile, ZipFile* sharedZip) c
 }
 
 bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const bool writeSpineEntries,
-                           const bool metadataOnly, ZipFile* sharedZip) {
+                           const bool metadataOnly, ZipFile* sharedZip, bool* coverReadFailed) {
   std::string contentOpfFilePath;
   if (!findContentOpfFile(&contentOpfFilePath, sharedZip)) {
     LOG_ERR("EBP", "Could not find content.opf in zip");
@@ -154,6 +154,8 @@ bool Epub::parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, const 
         bookMetadata.coverItemHref = FsHelpers::normalisePath(FsHelpers::decodeUriEscapes(coverPageBase + imageRef));
         LOG_DBG("EBP", "Found cover image from guide: %s", bookMetadata.coverItemHref.c_str());
       }
+    } else if (coverReadFailed) {
+      *coverReadFailed = true;
     }
   }
 
@@ -984,15 +986,23 @@ bool Epub::generateThumbBmpFromSource(int height) {
     LOG_ERR("EBP", "OOM: cover metadata");
     return false;
   }
+  // The cover of a protected book, guide cover page included, is encrypted like
+  // everything else, so the access path must be open before the package is parsed.
+  if (!decryptor && !openProtection()) return false;
   if (!zip->open()) {
     LOG_ERR("EBP", "Could not open EPUB for cover metadata");
     return false;
   }
-  if (!parseContentOpf(*metadata, /*writeSpineEntries=*/false, /*metadataOnly=*/false, zip.get())) return false;
+  bool coverReadFailed = false;
+  if (!parseContentOpf(*metadata, /*writeSpineEntries=*/false, /*metadataOnly=*/false, zip.get(), &coverReadFailed))
+    return false;
   zip.reset();
-  // The cover of a protected book is encrypted like everything else.
-  if (!decryptor && !openProtection()) return false;
   setupCacheDir();
+  if (metadata->coverItemHref.empty()) {
+    // Mark only a conclusive "no cover"; a failed read is retried next time.
+    if (!coverReadFailed) writeNoCoverMarker(height);
+    return false;
+  }
   return generateThumbBmpForCover(height, metadata->coverItemHref);
 }
 
@@ -1078,10 +1088,13 @@ bool Epub::generateThumbBmpForCover(int height, const std::string& coverImageHre
     LOG_ERR("EBP", "Cover image is not a supported format, skipping thumbnail");
   }
 
-  // Write an empty bmp file to avoid generation attempts in the future
+  writeNoCoverMarker(height);
+  return false;
+}
+
+void Epub::writeNoCoverMarker(const int height) const {
   HalFile thumbBmp;
   Storage.openFileForWrite("EBP", getThumbBmpPath(height), thumbBmp);
-  return false;
 }
 
 uint8_t* Epub::readItemContentsToBytes(const std::string& itemHref, size_t* size, const bool trailingNullByte) const {
