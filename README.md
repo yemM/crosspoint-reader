@@ -25,7 +25,7 @@ This fork follows the `develop` branch of [CrossPoint Reader](https://github.com
 - **Swipe page turns in text viewers**: the description, dictionary definition and plugin README viewers turn pages with a swipe (left or up = next, right or down = previous), as well as with taps and buttons.
 - **Stats home** (devices with PSRAM, e.g. X4 Pro): a new home theme based on Cover Grid with reading statistics on extra pages. It shows books finished this year, reading time, pages read, a yearly goal, minutes read over the last 7 days, the reading streak, the time of day you read, and this week's and all-time totals. Reading is recorded on every PSRAM device, whatever the theme, in `.crosspoint/reading_stats.bin`. New setting: **Yearly Reading Goal**.
 - **Covers in the Library**: **Settings → System → Show Covers in Library** shows each book's cover beside its title. **Refresh library** prepares all covers at once.
-- **Faster Cover Grid home**: the home screen refreshes once when all covers are cached, and a cover that cannot be decoded is no longer retried on every visit.
+- **Faster Cover Grid home**: the home screen refreshes once when all covers are cached, and a book whose cover is missing or cannot be decoded is no longer retried on every visit.
 
 ### Reliability fixes
 

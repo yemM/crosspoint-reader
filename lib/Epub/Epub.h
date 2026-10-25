@@ -47,12 +47,16 @@ class Epub {
   std::string protectionError;
 
   bool findContentOpfFile(std::string* contentOpfFile, ZipFile* sharedZip = nullptr) const;
+  // coverReadFailed, when given, is set if the guide's cover page could not be
+  // read, so an empty coverItemHref does not prove the book has no cover.
   bool parseContentOpf(BookMetadataCache::BookMetadata& bookMetadata, bool writeSpineEntries = true,
-                       bool metadataOnly = false, ZipFile* sharedZip = nullptr);
+                       bool metadataOnly = false, ZipFile* sharedZip = nullptr, bool* coverReadFailed = nullptr);
   // One metadata-only pass over the package document. Fills whichever of
   // sync / description is non-null; the description is capped at descriptionLimit.
   bool readPackageMetadata(SyncMetadata* sync, std::string* description, size_t descriptionLimit);
   bool generateThumbBmpForCover(int height, const std::string& coverImageHref) const;
+  // Empty thumb file: "no cover", so callers that only check existence stop retrying.
+  void writeNoCoverMarker(int height) const;
   bool openProtection();
   bool parseTocNcxFile() const;
   bool parseTocNavFile() const;
