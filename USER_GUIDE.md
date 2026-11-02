@@ -142,7 +142,7 @@ On a button-only device:
 
 On a touch device, tap tabs, books, and the Search icon directly. Tap an active indexed tab again to reverse its sort direction. Swipe to scroll. Long-press a book on any tab to open the same options menu. Choose **Show groups** in a Title or Author view, then tap a group to expand it.
 
-**Description** shows the summary stored in an EPUB (`dc:description`; Calibre fills it from the book's Comments field). It is offered for EPUB files only.
+**Description** shows the summary stored in an EPUB (`dc:description`; Calibre fills it from the book's Comments field). It is offered for EPUB files only. When the book belongs to a series, the series name and number (for example *Discworld #3*) appear in bold above the summary.
 
 The index is created automatically the first time the Library is opened. To pick up later file changes or updated metadata, use **Settings → System → Rebuild library index**. The **Use book metadata** setting controls whether the index reads titles and authors stored inside books. Turn on **Settings → System → Show Covers in Library** to see each book's cover beside its title instead of the file icon.
 
