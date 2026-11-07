@@ -11,6 +11,7 @@
 #include <LibraryText.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <TxtToHtml.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -78,6 +79,30 @@ const char* tabLabelFor(const int tab) {
   if (tab == TITLE_TAB) return tr(STR_LIBRARY_TAB_TITLE);
   if (tab == AUTHOR_TAB) return tr(STR_LIBRARY_TAB_AUTHOR);
   return tr(STR_LIBRARY_TAB_RECENT);
+}
+
+// "Series #2" as a bold first line of the description, in its own markup. A
+// heading (not <b>) stays bold if the viewer falls back to plain text.
+void prependSeriesLine(std::string& text, const Epub::SyncMetadata& meta, const bool html) {
+  char number[16] = {};
+  if (meta.seriesIndex) snprintf(number, sizeof(number), " #%g", static_cast<double>(*meta.seriesIndex));
+  std::string line;
+  if (html) {
+    line = "<h2>";
+    TxtToHtml::appendEscapedHtml(line, meta.series);
+    line += number;
+    line += "</h2>";
+  } else {
+    line = DICTIONARY_PLAIN_HEADWORD_MARKER;  // bolds the line in the plain viewer
+    line += meta.series;
+    line += number;
+    line += "\n\n";
+  }
+  // An 8 KiB description fills its capacity, so insert() would double it to
+  // 16 KiB; an exact reserve on a fresh string keeps the peak at the sum.
+  line.reserve(line.size() + text.size());
+  line += text;
+  text.swap(line);
 }
 
 }  // namespace
@@ -351,6 +376,7 @@ void LibraryListActivity::showBookDescription(const std::string& path, const std
   // string and its laid-out pages take while the viewer is open.
   static constexpr size_t MAX_DESCRIPTION_BYTES = 8 * 1024;
   std::string text;
+  Epub::SyncMetadata meta;
   const bool reopenIndex = index.isOpen();
   {
     // The book wants the card to itself, and the render task must not read
@@ -359,7 +385,8 @@ void LibraryListActivity::showBookDescription(const std::string& path, const std
     GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
     index.close();
     Epub epub(path, "/.crosspoint");
-    if (!epub.loadDescription(text, MAX_DESCRIPTION_BYTES)) LOG_ERR("LIB", "cannot read description: %s", path.c_str());
+    if (!epub.loadDescription(text, MAX_DESCRIPTION_BYTES, &meta))
+      LOG_ERR("LIB", "cannot read description: %s", path.c_str());
   }
   const bool empty =
       std::all_of(text.begin(), text.end(), [](const char c) { return std::isspace(static_cast<unsigned char>(c)); });
@@ -370,6 +397,7 @@ void LibraryListActivity::showBookDescription(const std::string& path, const std
     html = std::isalpha(static_cast<unsigned char>(next)) || next == '/' || next == '!';
   }
   if (empty) text = tr(STR_NO_BOOK_DESCRIPTION);
+  if (!meta.series.empty()) prependSeriesLine(text, meta, html);
 
   auto viewer = makeUniqueNoThrow<DictionaryDefinitionActivity>(renderer, mappedInput, title, std::move(text), html);
   if (!viewer) {
@@ -1035,6 +1063,7 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
   configureSwipeDelete(screen, props);
 #endif
   screen.list(props);
+#if defined(ENABLE_SERIAL_LOG) && LOG_LEVEL >= 2
   const int next = nav.drawnRows;
   const auto body = screen.body();
   LOG_DBG("LIB", "page tab=%d top=%d full=%d loaded=%d body=%d..%d next=%d title=%s", activeTabIndex, windowStart,
@@ -1043,6 +1072,7 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
           next < rows ? winItems[static_cast<size_t>(next)].label : "<none>");
   LOG_DBG("LIB", "page first=%d title=%s", rows > 0 ? winItems[0].actionValue : -1,
           rows > 0 ? winItems[0].label : "<none>");
+#endif
 }
 
 void LibraryListActivity::formatInitialHeading(uint32_t initial, std::string& out) {

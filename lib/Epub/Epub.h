@@ -72,7 +72,8 @@ class Epub {
   bool loadSyncMetadata(SyncMetadata& metadata);
   // The first <dc:description>, raw (often HTML), at most maxBytes. Parses the
   // package document each call; nothing is cached. False when unreadable.
-  bool loadDescription(std::string& description, size_t maxBytes);
+  // extra, when given, is filled from the same pass (e.g. the series).
+  bool loadDescription(std::string& description, size_t maxBytes, SyncMetadata* extra = nullptr);
   bool clearCache() const;
   void setupCacheDir() const;
   const std::string& getCachePath() const;

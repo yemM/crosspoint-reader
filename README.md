@@ -17,11 +17,11 @@ Check [our Devices page](https://crosspointreader.com/devices) for the full list
 
 ## Changes in this fork
 
-This fork follows the `develop` branch of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) and adds the changes below. Last synced with upstream on 2026-10-24.
+This fork follows the `develop` branch of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) and adds the changes below. Last synced with upstream on 2026-11-07.
 
 ### New features
 
-- **Book description in the Library**: hold a book on any Library tab to open its options menu. **Description** shows the book's summary (Calibre's "Comments", stored as `dc:description` in the EPUB), with its formatting. The menu also has Open, Remove from recents, Show groups, Delete and Rebuild index. Grouping on the Title and Author tabs is now in this menu (**Show groups**).
+- **Book description in the Library**: hold a book on any Library tab to open its options menu. **Description** shows the book's summary (Calibre's "Comments", stored as `dc:description` in the EPUB), with its formatting, headed by the series name and number when the book is part of a series. The menu also has Open, Remove from recents, Show groups, Delete and Rebuild index. Grouping on the Title and Author tabs is now in this menu (**Show groups**).
 - **Swipe page turns in text viewers**: the description, dictionary definition and plugin README viewers turn pages with a swipe (left or up = next, right or down = previous), as well as with taps and buttons.
 - **Stats home** (devices with PSRAM, e.g. X4 Pro): a new home theme based on Cover Grid with reading statistics on extra pages. It shows books finished this year, reading time, pages read, a yearly goal, minutes read over the last 7 days, the reading streak, the time of day you read, and this week's and all-time totals. Reading is recorded on every PSRAM device, whatever the theme, in `.crosspoint/reading_stats.bin`. New setting: **Yearly Reading Goal**.
 - **Covers in the Library**: **Settings → System → Show Covers in Library** shows each book's cover beside its title. **Refresh library** prepares all covers at once.

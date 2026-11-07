@@ -694,9 +694,10 @@ bool Epub::loadSyncMetadata(SyncMetadata& metadata) {
   return readPackageMetadata(&metadata, nullptr, 0);
 }
 
-bool Epub::loadDescription(std::string& description, const size_t maxBytes) {
+bool Epub::loadDescription(std::string& description, const size_t maxBytes, SyncMetadata* extra) {
   description.clear();
-  return readPackageMetadata(nullptr, &description, maxBytes);
+  if (extra) *extra = {};
+  return readPackageMetadata(extra, &description, maxBytes);
 }
 
 bool Epub::readPackageMetadata(SyncMetadata* sync, std::string* description, const size_t descriptionLimit) {
